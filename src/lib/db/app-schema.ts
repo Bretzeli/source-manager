@@ -30,10 +30,11 @@ export const topics = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    abbreviation: text("abbreviation").notNull(),
+    abbreviation: text("abbreviation"), // Optional
     name: text("name").notNull(),
     description: text("description"),
     notes: text("notes"),
+    color: text("color").default("#3b82f6").notNull(), // Default blue color
   },
   (table) => [index("topics_projectId_idx").on(table.projectId)]
 );
@@ -46,7 +47,7 @@ export const sources = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    abbreviation: text("abbreviation").notNull(),
+    abbreviation: text("abbreviation"), // Optional
     title: text("title").notNull(),
     description: text("description"), // unlimited length - using text type
     authors: text("authors"), // storing authors as text (can be comma-separated or JSON)

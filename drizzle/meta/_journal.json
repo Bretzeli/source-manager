@@ -15,6 +15,20 @@
       "when": 1768233656253,
       "tag": "0001_military_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1768239288032,
+      "tag": "0002_mysterious_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1768245577221,
+      "tag": "0003_safe_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

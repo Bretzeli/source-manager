@@ -52,7 +52,7 @@ export function AuthModal({ fullyCover: propFullyCover }: AuthModalProps) {
   const { isOpen, defaultMode, fullyCover: contextFullyCover, closeModal } = useAuthModal()
   const fullyCover = propFullyCover ?? contextFullyCover
   const router = useRouter()
-  const t = useTranslations()
+  const { t } = useTranslations()
   const [mode, setMode] = React.useState<"login" | "signup">(defaultMode)
   const [isLoading, setIsLoading] = React.useState(false)
   const [email, setEmail] = React.useState("")
@@ -193,7 +193,7 @@ export function AuthModal({ fullyCover: propFullyCover }: AuthModalProps) {
                   <Input
                     id="login-email"
                     type="email"
-                    placeholder="name@example.com"
+                    placeholder={t.login.emailPlaceholder}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -242,7 +242,7 @@ export function AuthModal({ fullyCover: propFullyCover }: AuthModalProps) {
                   <Input
                     id="signup-name"
                     type="text"
-                    placeholder="John Doe"
+                    placeholder={t.signup.namePlaceholder}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
@@ -255,7 +255,7 @@ export function AuthModal({ fullyCover: propFullyCover }: AuthModalProps) {
                   <Input
                     id="signup-email"
                     type="email"
-                    placeholder="name@example.com"
+                    placeholder={t.signup.emailPlaceholder}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required

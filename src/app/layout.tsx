@@ -5,6 +5,7 @@ import "./globals.css";
 import { AuthModalProvider } from "@/contexts/auth-modal-context";
 import { AuthModal } from "@/components/auth-modal";
 import { Toaster } from "@/components/ui/sonner";
+import { Navbar } from "@/components/navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,6 +34,7 @@ export default function RootLayout({
       >
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthModalProvider>
+            <Navbar />
             {children}
             <AuthModal />
             <Toaster />
