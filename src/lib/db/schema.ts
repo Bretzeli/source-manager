@@ -93,3 +93,6 @@ export const accountRelations = relations(account, ({ one }) => ({
     references: [user.id],
   }),
 }));
+
+// Re-export application schemas
+export * from "./app-schema";

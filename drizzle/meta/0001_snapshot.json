@@ -1,6 +1,6 @@
 {
-  "id": "67b57a37-0c3f-4fd8-bf74-461edb2d6ce8",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "6942f9bf-e015-4926-8693-903de1adc15e",
+  "prevId": "67b57a37-0c3f-4fd8-bf74-461edb2d6ce8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -415,97 +415,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.project_topics": {
-      "name": "project_topics",
-      "schema": "",
-      "columns": {
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "topic_id": {
-          "name": "topic_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "project_topics_projectId_idx": {
-          "name": "project_topics_projectId_idx",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "project_topics_topicId_idx": {
-          "name": "project_topics_topicId_idx",
-          "columns": [
-            {
-              "expression": "topic_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "project_topics_project_id_projects_id_fk": {
-          "name": "project_topics_project_id_projects_id_fk",
-          "tableFrom": "project_topics",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "project_topics_topic_id_topics_id_fk": {
-          "name": "project_topics_topic_id_topics_id_fk",
-          "tableFrom": "project_topics",
-          "tableTo": "topics",
-          "columnsFrom": [
-            "topic_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "project_topics_project_id_topic_id_pk": {
-          "name": "project_topics_project_id_topic_id_pk",
-          "columns": [
-            "project_id",
-            "topic_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.projects": {
       "name": "projects",
       "schema": "",
@@ -882,6 +791,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "abbreviation": {
           "name": "abbreviation",
           "type": "text",
@@ -907,8 +822,38 @@
           "notNull": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "topics_projectId_idx": {
+          "name": "topics_projectId_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "topics_project_id_projects_id_fk": {
+          "name": "topics_project_id_projects_id_fk",
+          "tableFrom": "topics",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
