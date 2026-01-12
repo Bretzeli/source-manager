@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 
 type Locale = "en" | "de"
 
@@ -74,16 +74,12 @@ const translations = {
 function getLocale(): Locale {
   if (typeof window === "undefined") return "en"
   
-  const browserLang = navigator.language || (navigator as any).userLanguage || "en"
+  const browserLang = navigator.language || ((navigator as Navigator & { userLanguage?: string }).userLanguage) || "en"
   return browserLang.startsWith("de") ? "de" : "en"
 }
 
 export function useTranslations() {
-  const [locale, setLocale] = useState<Locale>("en")
-
-  useEffect(() => {
-    setLocale(getLocale())
-  }, [])
+  const [locale] = useState<Locale>(() => getLocale())
 
   return translations[locale]
 }
