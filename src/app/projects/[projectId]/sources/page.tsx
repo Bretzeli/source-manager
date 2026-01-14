@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react"
 import { useTranslations } from "@/lib/i18n"
-import { getSources, getTopics, createSource, updateSource, deleteSource, createTopic } from "@/app/actions/sources"
+import { getSources, getTopics, createSource, updateSource, deleteSource, createTopic, batchImportSources } from "@/app/actions/sources"
+import { getProject } from "@/app/actions/projects"
 import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -49,7 +50,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown } from "lucide-react"
+import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "sonner"
 import { useParams } from "next/navigation"
@@ -150,6 +151,7 @@ export default function SourcesPage() {
   
   const [sources, setSources] = useState<Source[]>([])
   const [topics, setTopics] = useState<Topic[]>([])
+  const [projectName, setProjectName] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -210,6 +212,42 @@ export default function SourcesPage() {
     color: "#3b82f6",
   })
   const [customColor, setCustomColor] = useState(false)
+  
+  // Import/Export state
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importData, setImportData] = useState<Array<{
+    abbreviation?: string | null
+    title: string
+    description?: string | null
+    authors?: string | null
+    publicationDate?: string | null
+    notes?: string | null
+    links?: string | null
+    bibtex?: string | null
+    topicNames?: string[]
+    topicColors?: Record<string, string>
+    topicAbbreviations?: Record<string, string>
+  }>>([])
+  const [selectedImportIndices, setSelectedImportIndices] = useState<Set<number>>(new Set())
+  const [importing, setImporting] = useState(false)
+  const [existingBibtexSet, setExistingBibtexSet] = useState<Set<string>>(new Set())
+  
+  // Import dialog column settings
+  const [importColumnVisibility, setImportColumnVisibility] = useState<Record<ColumnKey, boolean>>({
+    abbreviation: true,
+    title: true,
+    authors: true,
+    publicationDate: true,
+    topics: true,
+    description: true,
+    notes: true,
+    links: true,
+    bibtex: true,
+  })
+  const [importColumnOrder, setImportColumnOrder] = useState<ColumnKey[]>(COLUMN_ORDER)
+  const [importDraggedColumnIndex, setImportDraggedColumnIndex] = useState<number | null>(null)
+  const [importDragOverColumnIndex, setImportDragOverColumnIndex] = useState<number | null>(null)
 
   const predefinedColors = [
     { name: "Blue", value: "#3b82f6" },
@@ -224,12 +262,16 @@ export default function SourcesPage() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [sourcesData, topicsData] = await Promise.all([
+      const [sourcesData, topicsData, projectData] = await Promise.all([
         getSources(projectId),
         getTopics(projectId),
+        getProject(projectId),
       ])
       setSources(sourcesData as Source[])
       setTopics(topicsData as Topic[])
+      if (projectData) {
+        setProjectName(projectData.title)
+      }
     } catch (error) {
       toast.error(t.errors.generic)
       console.error(error)
@@ -261,7 +303,7 @@ export default function SourcesPage() {
         setAuthorFilter(savedPrefs.authorFilter)
       }
       if (savedPrefs.pageSize) {
-        setPageSize(savedPrefs.pageSize)
+        setPageSize(savedPrefs.pageSize as number | "all")
       }
     }
   }, [projectId])
@@ -452,7 +494,17 @@ export default function SourcesPage() {
     if (!source) return
 
     try {
-      const updateData: any = { [editingCell.column]: editValue || null }
+      const updateData: {
+        abbreviation?: string
+        title?: string
+        description?: string | null
+        authors?: string | null
+        publicationDate?: string | null
+        notes?: string | null
+        links?: string | null
+        bibtex?: string | null
+        topicIds?: string[]
+      } = { [editingCell.column]: editValue || null }
 
       // Handle BibTeX sync
       if (editingCell.column === "bibtex") {
@@ -477,8 +529,8 @@ export default function SourcesPage() {
           // Check if BibTeX matches current source fields (before edit)
           const beforeEdit = {
             title: source.title,
-            authors: source.authors,
-            publicationDate: source.publicationDate,
+            authors: source.authors ?? undefined,
+            publicationDate: source.publicationDate ?? undefined,
           }
           
           if (bibtexFieldsMatch(currentBibtex, currentBibtex, beforeEdit)) {
@@ -571,7 +623,7 @@ export default function SourcesPage() {
     try {
       setCreating(true)
       
-      let sourceData = { ...newSource }
+      const sourceData = { ...newSource }
       
       // If BibTeX is provided, parse it and merge with form data
       if (newSource.bibtex.trim()) {
@@ -674,6 +726,316 @@ export default function SourcesPage() {
 
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
+  }
+
+  // Sanitize filename - remove invalid characters for Windows, macOS, Linux
+  const sanitizeFilename = (name: string): string => {
+    // Remove Windows reserved characters: < > : " / \ | ? *
+    // Remove control characters (char codes < 32)
+    // Remove trailing spaces and dots (Windows restriction)
+    let sanitized = name
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
+      .replace(/[\s.]+$/, "")
+      .trim()
+    
+    // If empty after sanitization, use a default
+    if (!sanitized) {
+      sanitized = "project"
+    }
+    
+    return sanitized
+  }
+
+  // Export functions
+  const exportToCSV = () => {
+    const headers = ["abbreviation", "title", "authors", "publicationDate", "description", "notes", "links", "bibtex", "topics"]
+    const rows = filteredAndSortedSources.map((source) => {
+      const topicsStr = source.topics.map((t) => {
+        if (t.abbreviation) {
+          return `${t.name} (${t.abbreviation})`
+        }
+        return t.name
+      }).join("; ")
+      return [
+        source.abbreviation || "",
+        source.title || "",
+        source.authors || "",
+        source.publicationDate || "",
+        source.description || "",
+        source.notes || "",
+        source.links || "",
+        source.bibtex || "",
+        topicsStr,
+      ]
+    })
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) =>
+        row.map((cell) => {
+          const str = String(cell || "")
+          // Escape quotes and wrap in quotes if contains comma, newline, or quote
+          if (str.includes(",") || str.includes("\n") || str.includes('"')) {
+            return `"${str.replace(/"/g, '""')}"`
+          }
+          return str
+        }).join(",")
+      ),
+    ].join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    const sanitizedProjectName = sanitizeFilename(projectName)
+    const sourcesWord = t.sources.title.toLowerCase()
+    const dateStr = new Date().toISOString().split("T")[0]
+    link.setAttribute("download", `${sanitizedProjectName}_${sourcesWord}_${dateStr}.csv`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const exportToJSON = () => {
+    const jsonData = filteredAndSortedSources.map((source) => {
+      const topics = source.topics.map((t) => ({
+        name: t.name,
+        abbreviation: t.abbreviation || null,
+        color: t.color,
+      }))
+      return {
+        abbreviation: source.abbreviation,
+        title: source.title,
+        authors: source.authors,
+        publicationDate: source.publicationDate,
+        description: source.description,
+        notes: source.notes,
+        links: source.links,
+        bibtex: source.bibtex,
+        topics,
+      }
+    })
+
+    const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: "application/json" })
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+    link.setAttribute("href", url)
+    const sanitizedProjectName = sanitizeFilename(projectName)
+    const sourcesWord = t.sources.title.toLowerCase()
+    const dateStr = new Date().toISOString().split("T")[0]
+    link.setAttribute("download", `${sanitizedProjectName}_${sourcesWord}_${dateStr}.json`)
+    link.style.visibility = "hidden"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  // Import functions
+  const parseCSV = (csvText: string): Array<Record<string, string>> => {
+    if (!csvText.trim()) return []
+
+    const rows: string[][] = []
+    let currentRow: string[] = []
+    let currentValue = ""
+    let inQuotes = false
+
+    for (let i = 0; i < csvText.length; i++) {
+      const char = csvText[i]
+      const nextChar = csvText[i + 1]
+
+      if (char === '"') {
+        if (inQuotes && nextChar === '"') {
+          // Escaped quote
+          currentValue += '"'
+          i++
+        } else {
+          // Toggle quote state
+          inQuotes = !inQuotes
+        }
+      } else if (char === "," && !inQuotes) {
+        // Field separator
+        currentRow.push(currentValue.trim())
+        currentValue = ""
+      } else if ((char === "\n" || char === "\r") && !inQuotes) {
+        // Row separator (only if not in quotes)
+        if (char === "\r" && nextChar === "\n") {
+          i++ // Skip \r\n
+        }
+        if (currentValue.trim() || currentRow.length > 0) {
+          currentRow.push(currentValue.trim())
+          if (currentRow.some(v => v.length > 0)) {
+            rows.push(currentRow)
+          }
+          currentRow = []
+          currentValue = ""
+        }
+      } else {
+        currentValue += char
+      }
+    }
+
+    // Add last row
+    if (currentValue.trim() || currentRow.length > 0) {
+      currentRow.push(currentValue.trim())
+      if (currentRow.some(v => v.length > 0)) {
+        rows.push(currentRow)
+      }
+    }
+
+    if (rows.length === 0) return []
+
+    // First row is headers
+    const headers = rows[0].map(h => h.trim())
+    const dataRows: Array<Record<string, string>> = []
+
+    for (let i = 1; i < rows.length; i++) {
+      const row: Record<string, string> = {}
+      headers.forEach((header, index) => {
+        // Remove surrounding quotes if present
+        let value = rows[i][index] || ""
+        if (value.startsWith('"') && value.endsWith('"')) {
+          value = value.slice(1, -1).replace(/""/g, '"')
+        }
+        row[header] = value
+      })
+      dataRows.push(row)
+    }
+
+    return dataRows
+  }
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setImportFile(file)
+    const text = await file.text()
+
+    try {
+      type ParsedRow = Record<string, unknown> & {
+        abbreviation?: string
+        title?: string
+        authors?: string
+        publicationDate?: string
+        description?: string
+        notes?: string
+        links?: string
+        bibtex?: string
+        topics?: string | Array<string | { name?: string; color?: string; abbreviation?: string }>
+      }
+      
+      let parsedData: ParsedRow[] = []
+
+      if (file.name.endsWith(".csv")) {
+        parsedData = parseCSV(text) as ParsedRow[]
+      } else if (file.name.endsWith(".json")) {
+        parsedData = JSON.parse(text) as ParsedRow[]
+      } else {
+        toast.error(t.sources.import.invalidFile)
+        return
+      }
+
+      // Convert to import format
+      const importSources: typeof importData = parsedData.map((row: ParsedRow) => {
+        let topics: string[] = []
+        const topicColors: Record<string, string> = {}
+        const topicAbbreviations: Record<string, string> = {}
+        
+        if (row.topics) {
+          if (typeof row.topics === "string") {
+            // CSV format: "name (abbrev); name (abbrev)" or "name; name"
+            topics = row.topics.split(";").map((t: string) => {
+              const trimmed = t.trim()
+              if (!trimmed) return null
+              // Parse "name (abbrev)" format
+              const match = trimmed.match(/^(.+?)\s*\((.+?)\)$/)
+              if (match) {
+                const name = match[1].trim()
+                const abbrev = match[2].trim()
+                topicAbbreviations[name] = abbrev
+                return name
+              }
+              return trimmed
+            }).filter((t: string | null): t is string => t !== null)
+          } else if (Array.isArray(row.topics)) {
+            // JSON format
+            topics = row.topics.map((t: string | { name?: string; color?: string; abbreviation?: string }) => {
+              if (typeof t === "string") {
+                return t
+              } else if (t.name) {
+                if (t.color) {
+                  topicColors[t.name] = t.color
+                }
+                if (t.abbreviation) {
+                  topicAbbreviations[t.name] = t.abbreviation
+                }
+                return t.name
+              }
+              return null
+            }).filter((t: string | null): t is string => t !== null)
+          }
+        }
+
+        return {
+          abbreviation: row.abbreviation || null,
+          title: row.title || "",
+          authors: row.authors || null,
+          publicationDate: row.publicationDate || null,
+          description: row.description || null,
+          notes: row.notes || null,
+          links: row.links || null,
+          bibtex: row.bibtex || null,
+          topicNames: topics,
+          topicColors,
+          topicAbbreviations,
+        }
+      })
+
+      setImportData(importSources)
+      setSelectedImportIndices(new Set(importSources.map((_, index) => index)))
+
+      // Get existing bibtex
+      const existingBibtex = new Set(sources.filter((s) => s.bibtex).map((s) => s.bibtex!.trim()))
+      setExistingBibtexSet(existingBibtex)
+    } catch (error) {
+      toast.error(t.sources.import.invalidFile)
+      console.error(error)
+    }
+  }
+
+  const handleExcludeExisting = () => {
+    const newSelected = new Set<number>()
+    importData.forEach((source, index) => {
+      if (!source.bibtex || !existingBibtexSet.has(source.bibtex.trim())) {
+        newSelected.add(index)
+      }
+    })
+    setSelectedImportIndices(newSelected)
+  }
+
+  const handleImport = async () => {
+    if (selectedImportIndices.size === 0) {
+      toast.error(t.sources.import.noSourcesToImport)
+      return
+    }
+
+    try {
+      setImporting(true)
+      const sourcesToImport = Array.from(selectedImportIndices).map((index) => importData[index])
+      await batchImportSources(projectId, sourcesToImport)
+      toast.success(t.sources.import.importSuccess)
+      setImportDialogOpen(false)
+      setImportFile(null)
+      setImportData([])
+      setSelectedImportIndices(new Set())
+      await loadData()
+    } catch (error) {
+      toast.error(t.sources.import.importError)
+      console.error(error)
+    } finally {
+      setImporting(false)
+    }
   }
 
   // Format publication date to show only what's entered
@@ -848,12 +1210,34 @@ export default function SourcesPage() {
         </Select>
           </div>
 
-          <div className="flex flex-col">
+          <div className="flex flex-col gap-2">
             <Label className="text-xs text-muted-foreground mb-1 block opacity-0">Add</Label>
-            <Button onClick={() => setAddDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              {t.sources.addSource}
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={() => setAddDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                {t.sources.addSource}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="mr-2 h-4 w-4" />
+                    {t.sources.export.download}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportToCSV}>
+                    {t.sources.export.csv}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportToJSON}>
+                    {t.sources.export.json}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" />
+                {t.sources.import.import}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1590,6 +1974,276 @@ export default function SourcesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Import Dialog */}
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="!max-w-[98vw] !w-[98vw] max-h-[95vh] overflow-hidden !flex !flex-col">
+          <DialogHeader>
+            <DialogTitle>{t.sources.import.importSources}</DialogTitle>
+            <DialogDescription>
+              {t.sources.import.selectFile}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 py-4">
+            {!importFile ? (
+              <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8">
+                <Label htmlFor="import-file" className="cursor-pointer">
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload className="h-8 w-8 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      {t.sources.import.selectFile}
+                    </span>
+                  </div>
+                </Label>
+                <input
+                  id="import-file"
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">{t.sources.import.fileSelected}: {importFile.name}</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Button variant="outline" size="sm" onClick={handleExcludeExisting}>
+                      {t.sources.import.excludeExisting}
+                    </Button>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <Settings2 className="mr-2 h-4 w-4" />
+                          {t.sources.columnSettings.title}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80">
+                        <div className="space-y-4">
+                          <div>
+                            <Label className="text-sm font-medium">{t.sources.columnSettings.showHide}</Label>
+                            <p className="text-xs text-muted-foreground mb-2">{t.sources.columnSettings.reorder}</p>
+                            <div className="mt-2 space-y-2 max-h-[400px] overflow-y-auto">
+                              {importColumnOrder.map((col, index) => (
+                                <div
+                                  key={col}
+                                  draggable
+                                  onDragStart={() => {
+                                    setImportDraggedColumnIndex(index)
+                                  }}
+                                  onDragOver={(e) => {
+                                    e.preventDefault()
+                                    setImportDragOverColumnIndex(index)
+                                  }}
+                                  onDragLeave={() => {
+                                    setImportDragOverColumnIndex(null)
+                                  }}
+                                  onDrop={(e) => {
+                                    e.preventDefault()
+                                    if (importDraggedColumnIndex !== null && importDraggedColumnIndex !== index) {
+                                      const newOrder = [...importColumnOrder]
+                                      const [removed] = newOrder.splice(importDraggedColumnIndex, 1)
+                                      newOrder.splice(index, 0, removed)
+                                      setImportColumnOrder(newOrder)
+                                    }
+                                    setImportDraggedColumnIndex(null)
+                                    setImportDragOverColumnIndex(null)
+                                  }}
+                                  className={`flex items-center space-x-2 p-2 rounded-md transition-colors cursor-move ${
+                                    importDragOverColumnIndex === index ? "bg-accent" : ""
+                                  } ${importDraggedColumnIndex === index ? "opacity-50" : ""}`}
+                                >
+                                  <div className="text-muted-foreground select-none">⋮⋮</div>
+                                  <Checkbox
+                                    id={`import-${col}`}
+                                    checked={importColumnVisibility[col]}
+                                    onCheckedChange={(checked) => {
+                                      setImportColumnVisibility({ ...importColumnVisibility, [col]: checked as boolean })
+                                    }}
+                                  />
+                                  <Label htmlFor={`import-${col}`} className="text-sm font-normal cursor-pointer flex-1">
+                                    {getColumnLabel(col)}
+                                  </Label>
+                                  <div className="flex flex-col gap-0.5">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 p-0"
+                                      onClick={() => {
+                                        if (index > 0) {
+                                          const newOrder = [...importColumnOrder]
+                                          newOrder[index] = importColumnOrder[index - 1]
+                                          newOrder[index - 1] = col
+                                          setImportColumnOrder(newOrder)
+                                        }
+                                      }}
+                                      disabled={index === 0}
+                                    >
+                                      <ChevronUp className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 p-0"
+                                      onClick={() => {
+                                        if (index < importColumnOrder.length - 1) {
+                                          const newOrder = [...importColumnOrder]
+                                          newOrder[index] = importColumnOrder[index + 1]
+                                          newOrder[index + 1] = col
+                                          setImportColumnOrder(newOrder)
+                                        }
+                                      }}
+                                      disabled={index === importColumnOrder.length - 1}
+                                    >
+                                      <ChevronDown className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {selectedImportIndices.size} {t.sources.import.sourcesToImport}
+                </div>
+                {importData.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    {t.sources.import.noSourcesToImport}
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-auto border rounded-lg">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">
+                            <Checkbox
+                              checked={selectedImportIndices.size === importData.length && importData.length > 0}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedImportIndices(new Set(importData.map((_, index) => index)))
+                                } else {
+                                  setSelectedImportIndices(new Set())
+                                }
+                              }}
+                            />
+                          </TableHead>
+                          {importColumnOrder.filter((col) => importColumnVisibility[col]).map((col) => (
+                            <TableHead key={col}>{getColumnLabel(col)}</TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {importData.map((source, index) => {
+                          const hasExistingBibtex = source.bibtex && existingBibtexSet.has(source.bibtex.trim())
+                          const importVisibleColumns = importColumnOrder.filter((col) => importColumnVisibility[col])
+                          return (
+                            <TableRow key={index} className={hasExistingBibtex ? "opacity-50" : ""}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedImportIndices.has(index)}
+                                  onCheckedChange={(checked) => {
+                                    const newSelected = new Set(selectedImportIndices)
+                                    if (checked) {
+                                      newSelected.add(index)
+                                    } else {
+                                      newSelected.delete(index)
+                                    }
+                                    setSelectedImportIndices(newSelected)
+                                  }}
+                                />
+                              </TableCell>
+                              {importVisibleColumns.map((col) => {
+                                let cellValue: string | null = null
+                                if (col === "abbreviation") cellValue = source.abbreviation || null
+                                else if (col === "title") cellValue = source.title || null
+                                else if (col === "authors") cellValue = source.authors || null
+                                else if (col === "publicationDate") cellValue = source.publicationDate || null
+                                else if (col === "description") cellValue = source.description || null
+                                else if (col === "notes") cellValue = source.notes || null
+                                else if (col === "links") cellValue = source.links || null
+                                else if (col === "bibtex") cellValue = source.bibtex || null
+                                
+                                return (
+                                  <TableCell key={col}>
+                                    {col === "topics" ? (
+                                      source.topicNames && source.topicNames.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {source.topicNames.map((topicName, i) => (
+                                            <Badge
+                                              key={i}
+                                              variant="outline"
+                                              style={{
+                                                backgroundColor: source.topicColors?.[topicName] || "#3b82f6",
+                                                color: "white",
+                                                borderColor: source.topicColors?.[topicName] || "#3b82f6",
+                                              }}
+                                            >
+                                              {topicName}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        "-"
+                                      )
+                                    ) : col === "publicationDate" ? (
+                                      <div className="max-w-[150px] text-sm">{formatPublicationDate(cellValue)}</div>
+                                    ) : col === "links" ? (
+                                      <div className="max-w-[300px] text-sm">{renderLinks(cellValue)}</div>
+                                    ) : col === "authors" ? (
+                                      <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                                    ) : col === "bibtex" || col === "description" || col === "notes" ? (
+                                      <div className="max-w-[400px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                                    ) : (
+                                      <div className="truncate max-w-[200px]">{cellValue || "-"}</div>
+                                    )}
+                                  </TableCell>
+                                )
+                              })}
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setImportDialogOpen(false)
+                setImportFile(null)
+                setImportData([])
+                setSelectedImportIndices(new Set())
+              }}
+              disabled={importing}
+            >
+              {t.sources.import.cancel}
+            </Button>
+            <Button
+              onClick={handleImport}
+              disabled={importing || selectedImportIndices.size === 0 || !importFile}
+            >
+              {importing ? (
+                <>
+                  <Spinner className="mr-2 h-4 w-4" />
+                  {t.sources.import.importing}
+                </>
+              ) : (
+                t.sources.import.importSelected
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -354,3 +354,130 @@ export async function createTopic(projectId: string, data: {
   return newTopic
 }
 
+export async function batchImportSources(
+  projectId: string,
+  sourcesData: Array<{
+    abbreviation?: string | null
+    title: string
+    description?: string | null
+    authors?: string | null
+    publicationDate?: string | null
+    notes?: string | null
+    links?: string | null
+    bibtex?: string | null
+    topicNames?: string[]
+    topicColors?: Record<string, string>
+    topicAbbreviations?: Record<string, string>
+  }>
+) {
+  const session = await auth.api.getSession({ headers: await headers() })
+  
+  if (!session?.user) {
+    throw new Error("Unauthorized")
+  }
+
+  // Verify project ownership
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project || project.ownerId !== session.user.id) {
+    throw new Error("Project not found or unauthorized")
+  }
+
+  // Get existing topics for this project
+  const existingTopics = await db
+    .select()
+    .from(topics)
+    .where(eq(topics.projectId, projectId))
+
+  const topicNameToId: Record<string, string> = {}
+  existingTopics.forEach((topic) => {
+    topicNameToId[topic.name.toLowerCase()] = topic.id
+  })
+
+  // Get existing sources with bibtex to check for duplicates
+  const existingSources = await db
+    .select({ id: sources.id, bibtex: sources.bibtex })
+    .from(sources)
+    .where(eq(sources.projectId, projectId))
+
+  const existingBibtexSet = new Set(
+    existingSources
+      .map((s) => s.bibtex)
+      .filter((b): b is string => b !== null && b.trim() !== "")
+  )
+
+  const createdSources: string[] = []
+
+  for (const sourceData of sourcesData) {
+    // Skip if bibtex already exists
+    if (sourceData.bibtex && existingBibtexSet.has(sourceData.bibtex.trim())) {
+      continue
+    }
+
+    // Create the source
+    const [newSource] = await db
+      .insert(sources)
+      .values({
+        projectId,
+        abbreviation: sourceData.abbreviation?.trim() || null,
+        title: sourceData.title.trim(),
+        description: sourceData.description?.trim() || null,
+        authors: sourceData.authors?.trim() || null,
+        publicationDate: normalizeDate(sourceData.publicationDate),
+        notes: sourceData.notes?.trim() || null,
+        links: sourceData.links?.trim() || null,
+        bibtex: sourceData.bibtex?.trim() || null,
+      })
+      .returning()
+
+    createdSources.push(newSource.id)
+
+    // Handle topics
+    if (sourceData.topicNames && sourceData.topicNames.length > 0) {
+      const topicIds: string[] = []
+
+      for (const topicName of sourceData.topicNames) {
+        const topicNameLower = topicName.toLowerCase()
+        let topicId = topicNameToId[topicNameLower]
+
+        // Create topic if it doesn't exist
+        if (!topicId) {
+          const color = sourceData.topicColors?.[topicName] || "#3b82f6"
+          const abbreviation = sourceData.topicAbbreviations?.[topicName] || null
+          const [newTopic] = await db
+            .insert(topics)
+            .values({
+              projectId,
+              name: topicName.trim(),
+              abbreviation: abbreviation?.trim() || null,
+              color,
+            })
+            .returning()
+
+          topicId = newTopic.id
+          topicNameToId[topicNameLower] = topicId
+        }
+
+        topicIds.push(topicId)
+      }
+
+      // Create source-topic relations
+      if (topicIds.length > 0) {
+        await db.insert(sourceTopics).values(
+          topicIds.map((topicId) => ({
+            sourceId: newSource.id,
+            topicId,
+          }))
+        )
+      }
+    }
+  }
+
+  revalidatePath(`/projects/${projectId}/sources`)
+  return { count: createdSources.length }
+}
+
