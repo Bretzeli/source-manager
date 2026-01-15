@@ -45,6 +45,17 @@ export function useSources() {
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(COLUMN_ORDER)
   const [draggedColumnIndex, setDraggedColumnIndex] = useState<number | null>(null)
   const [dragOverColumnIndex, setDragOverColumnIndex] = useState<number | null>(null)
+  const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>({
+    abbreviation: 120,
+    title: 200,
+    authors: 180,
+    publicationDate: 120,
+    topics: 120,
+    description: 250,
+    notes: 250,
+    links: 250,
+    bibtex: 350,
+  })
 
   const [searchQuery, setSearchQuery] = useState("")
   const [topicFilter, setTopicFilter] = useState<string>("all")
@@ -158,6 +169,9 @@ export function useSources() {
       if (savedPrefs.columnOrder) {
         setColumnOrder(savedPrefs.columnOrder)
       }
+      if (savedPrefs.columnWidths) {
+        setColumnWidths({ ...columnWidths, ...savedPrefs.columnWidths })
+      }
       if (savedPrefs.topicFilter) {
         setTopicFilter(savedPrefs.topicFilter)
       }
@@ -185,6 +199,7 @@ export function useSources() {
       savePreferences(projectId, {
         columnVisibility,
         columnOrder,
+        columnWidths,
         topicFilter,
         yearFromFilter,
         yearToFilter,
@@ -192,7 +207,7 @@ export function useSources() {
         pageSize,
       })
     }
-  }, [projectId, columnVisibility, columnOrder, topicFilter, yearFromFilter, yearToFilter, authorFilter, pageSize])
+  }, [projectId, columnVisibility, columnOrder, columnWidths, topicFilter, yearFromFilter, yearToFilter, authorFilter, pageSize])
 
   const filteredAndSortedSources = useMemo(() => {
     let filtered = [...sources]
@@ -890,6 +905,8 @@ export function useSources() {
     setDraggedColumnIndex,
     dragOverColumnIndex,
     setDragOverColumnIndex,
+    columnWidths,
+    setColumnWidths,
     searchQuery,
     setSearchQuery,
     topicFilter,

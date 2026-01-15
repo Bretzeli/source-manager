@@ -32,6 +32,7 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
   const prefix = `sources_prefs_${projectId}_`
   const columnVisibility = getCookie(`${prefix}columnVisibility`)
   const columnOrder = getCookie(`${prefix}columnOrder`)
+  const columnWidths = getCookie(`${prefix}columnWidths`)
   const topicFilter = getCookie(`${prefix}topicFilter`)
   const yearFromFilter = getCookie(`${prefix}yearFromFilter`)
   const yearToFilter = getCookie(`${prefix}yearToFilter`)
@@ -41,6 +42,7 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
   return {
     columnVisibility: columnVisibility ? JSON.parse(columnVisibility) : null,
     columnOrder: columnOrder ? JSON.parse(columnOrder) : null,
+    columnWidths: columnWidths ? JSON.parse(columnWidths) : null,
     topicFilter: topicFilter || null,
     yearFromFilter: yearFromFilter || null,
     yearToFilter: yearToFilter || null,
@@ -57,6 +59,7 @@ export function savePreferences(
   prefs: {
     columnVisibility?: Record<ColumnKey, boolean>
     columnOrder?: ColumnKey[]
+    columnWidths?: Record<ColumnKey, number>
     topicFilter?: string
     yearFromFilter?: string
     yearToFilter?: string
@@ -67,6 +70,7 @@ export function savePreferences(
   const prefix = `sources_prefs_${projectId}_`
   if (prefs.columnVisibility) setCookie(`${prefix}columnVisibility`, JSON.stringify(prefs.columnVisibility))
   if (prefs.columnOrder) setCookie(`${prefix}columnOrder`, JSON.stringify(prefs.columnOrder))
+  if (prefs.columnWidths) setCookie(`${prefix}columnWidths`, JSON.stringify(prefs.columnWidths))
   if (prefs.topicFilter !== undefined) setCookie(`${prefix}topicFilter`, prefs.topicFilter)
   if (prefs.yearFromFilter !== undefined) setCookie(`${prefix}yearFromFilter`, prefs.yearFromFilter)
   if (prefs.yearToFilter !== undefined) setCookie(`${prefix}yearToFilter`, prefs.yearToFilter)

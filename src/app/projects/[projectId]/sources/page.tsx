@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { useTranslations } from "@/lib/i18n"
 import { parseBibtex, bibtexToSourceFields } from "@/lib/bibtex"
 import { useSources } from "@/hooks/use-sources"
@@ -95,6 +96,8 @@ export default function SourcesPage() {
     setDraggedColumnIndex,
     dragOverColumnIndex,
     setDragOverColumnIndex,
+    columnWidths,
+    setColumnWidths,
     searchQuery,
     setSearchQuery,
     topicFilter,
@@ -186,8 +189,64 @@ export default function SourcesPage() {
     handleMergeTopics,
   } = useSources()
 
+  const [isResizing, setIsResizing] = React.useState(false)
+  const [hasResized, setHasResized] = React.useState(false)
+  const [deleteTopicDialogOpen, setDeleteTopicDialogOpen] = React.useState(false)
+  const [topicToDelete, setTopicToDelete] = React.useState<{ id: string; name: string } | null>(null)
+
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
+  }
+
+  const handleColumnResize = (column: ColumnKey, newWidth: number) => {
+    setColumnWidths((prev) => ({
+      ...prev,
+      [column]: Math.max(50, newWidth), // Minimum width of 50px
+    }))
+  }
+
+  const handleResizeStart = (e: React.MouseEvent, column: ColumnKey) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startWidth = columnWidths[column]
+    let hasMoved = false
+
+    setIsResizing(true)
+    setHasResized(false)
+
+    const handleMouseMove = (e: MouseEvent) => {
+      hasMoved = true
+      const diff = e.clientX - startX
+      const newWidth = startWidth + diff
+      handleColumnResize(column, newWidth)
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove)
+      document.removeEventListener("mouseup", handleMouseUp)
+      setIsResizing(false)
+      if (hasMoved) {
+        setHasResized(true)
+        // Reset after a short delay to allow click event to be prevented
+        setTimeout(() => {
+          setHasResized(false)
+        }, 100)
+      }
+    }
+
+    document.addEventListener("mousemove", handleMouseMove)
+    document.addEventListener("mouseup", handleMouseUp)
+  }
+
+  const handleHeaderClick = (col: ColumnKey, e: React.MouseEvent) => {
+    // Prevent sorting if we just finished resizing
+    if (hasResized || isResizing) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    handleSort(col)
   }
 
   // Render links as free text with auto-clickable URLs, preserving newlines
@@ -535,22 +594,32 @@ export default function SourcesPage() {
         </div>
       ) : (
         <>
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
+          <div className="border rounded-lg overflow-x-auto">
+            <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow>
-                  {visibleColumns.map((col) => (
+                  {visibleColumns.map((col, index) => (
                     <TableHead
                       key={col}
-                      className="cursor-pointer select-none"
-                      onClick={() => handleSort(col)}
+                      className="cursor-pointer select-none relative group"
+                      onClick={(e) => handleHeaderClick(col, e)}
+                      style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 break-words whitespace-normal">
                         {getColumnLabel(col)}
                         {sortColumn === col && (
-                          <ArrowUpDown className="h-4 w-4" />
+                          <ArrowUpDown className="h-4 w-4 flex-shrink-0" />
                         )}
                       </div>
+                      {index < visibleColumns.length - 1 && (
+                        <div
+                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-primary/30 group-hover:bg-primary/40 transition-colors z-10"
+                          onMouseDown={(e) => {
+                            e.stopPropagation()
+                            handleResizeStart(e, col)
+                          }}
+                        />
+                      )}
                     </TableHead>
                   ))}
                   <TableHead className="w-[50px]"></TableHead>
@@ -560,7 +629,9 @@ export default function SourcesPage() {
                 {paginatedSources.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={visibleColumns.length + 1} className="text-center py-8 text-muted-foreground">
-                      No sources match your filters
+                      <div className="flex justify-center items-center w-full">
+                        No sources match your filters
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -574,7 +645,8 @@ export default function SourcesPage() {
                           <TableCell
                             key={col}
                             onDoubleClick={() => handleCellDoubleClick(source.id, col, cellValue)}
-                            className={col !== "topics" && col !== "bibtex" ? "cursor-pointer" : ""}
+                            className={`${col !== "topics" && col !== "bibtex" ? "cursor-pointer" : ""} break-words whitespace-normal`}
+                            style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -702,17 +774,21 @@ export default function SourcesPage() {
                                 </PopoverContent>
                               </Popover>
                             ) : col === "bibtex" || col === "description" || col === "notes" ? (
-                              <div className="max-w-[400px] text-sm whitespace-pre-wrap break-words">
+                              <div className="text-sm whitespace-pre-wrap break-words">
                                 {cellValue || "-"}
                               </div>
                             ) : col === "publicationDate" ? (
-                              <div className="max-w-[150px] text-sm">{formatPublicationDate(cellValue)}</div>
+                              <div className="text-sm break-words">{formatPublicationDate(cellValue)}</div>
                             ) : col === "links" ? (
-                              <div className="max-w-[300px] text-sm">{renderLinks(cellValue)}</div>
+                              <div className="text-sm break-words">{renderLinks(cellValue)}</div>
                             ) : col === "authors" ? (
-                              <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                              <div className="text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                            ) : col === "title" ? (
+                              <div className="text-sm break-words" style={{ wordBreak: "break-word", overflowWrap: "break-word" }}>{cellValue || "-"}</div>
+                            ) : col === "abbreviation" ? (
+                              <div className="text-sm break-words">{cellValue || "-"}</div>
                             ) : (
-                              <div className="truncate max-w-[200px]">{cellValue || "-"}</div>
+                              <div className="break-words">{cellValue || "-"}</div>
                             )}
                           </TableCell>
                         )
@@ -2097,9 +2173,8 @@ export default function SourcesPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            if (confirm(`Are you sure you want to delete "${topic.name}"? This will remove it from all sources.`)) {
-                              handleDeleteTopic(topic.id)
-                            }
+                            setTopicToDelete({ id: topic.id, name: topic.name })
+                            setDeleteTopicDialogOpen(true)
                           }}
                           className="text-destructive hover:text-destructive"
                         >
@@ -2120,6 +2195,33 @@ export default function SourcesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Topic Confirmation Dialog */}
+      <AlertDialog open={deleteTopicDialogOpen} onOpenChange={setDeleteTopicDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Topic</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{topicToDelete?.name}&quot;? This will remove it from all sources. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (topicToDelete) {
+                  handleDeleteTopic(topicToDelete.id)
+                  setDeleteTopicDialogOpen(false)
+                  setTopicToDelete(null)
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit Topic Dialog */}
       <Dialog 
