@@ -6,6 +6,7 @@ import { sources, topics, sourceTopics, projects } from "@/lib/db/app-schema"
 import { eq, and, desc, asc, or, like, sql, inArray } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
+import { sourceFieldsToBibtex, serializeBibtex } from "@/lib/bibtex"
 
 /**
  * Normalize date string to valid PostgreSQL DATE format
@@ -314,6 +315,32 @@ export async function deleteSource(projectId: string, sourceId: string) {
   revalidatePath(`/projects/${projectId}/sources`)
 }
 
+export async function deleteAllSources(projectId: string) {
+  const session = await auth.api.getSession({ headers: await headers() })
+  
+  if (!session?.user) {
+    throw new Error("Unauthorized")
+  }
+
+  // Verify project ownership
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project || project.ownerId !== session.user.id) {
+    throw new Error("Project not found or unauthorized")
+  }
+
+  // Delete all sources for this project (cascade will handle sourceTopics)
+  await db
+    .delete(sources)
+    .where(eq(sources.projectId, projectId))
+
+  revalidatePath(`/projects/${projectId}/sources`)
+}
+
 export async function createTopic(projectId: string, data: {
   abbreviation?: string | null
   name: string
@@ -352,6 +379,196 @@ export async function createTopic(projectId: string, data: {
 
   revalidatePath(`/projects/${projectId}/sources`)
   return newTopic
+}
+
+export async function updateTopic(
+  projectId: string,
+  topicId: string,
+  data: {
+    abbreviation?: string | null
+    name?: string
+    description?: string | null
+    notes?: string | null
+    color?: string
+  }
+) {
+  const session = await auth.api.getSession({ headers: await headers() })
+  
+  if (!session?.user) {
+    throw new Error("Unauthorized")
+  }
+
+  // Verify project ownership
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project || project.ownerId !== session.user.id) {
+    throw new Error("Project not found or unauthorized")
+  }
+
+  // Verify topic belongs to project
+  const [topic] = await db
+    .select()
+    .from(topics)
+    .where(and(eq(topics.id, topicId), eq(topics.projectId, projectId)))
+    .limit(1)
+
+  if (!topic) {
+    throw new Error("Topic not found")
+  }
+
+  const updateData: Partial<typeof topics.$inferInsert> = {}
+  
+  if (data.abbreviation !== undefined) updateData.abbreviation = data.abbreviation?.trim() || null
+  if (data.name !== undefined) updateData.name = data.name.trim()
+  if (data.description !== undefined) updateData.description = data.description?.trim() || null
+  if (data.notes !== undefined) updateData.notes = data.notes?.trim() || null
+  if (data.color !== undefined) updateData.color = data.color
+
+  await db
+    .update(topics)
+    .set(updateData)
+    .where(eq(topics.id, topicId))
+
+  revalidatePath(`/projects/${projectId}/sources`)
+}
+
+export async function deleteTopic(projectId: string, topicId: string) {
+  const session = await auth.api.getSession({ headers: await headers() })
+  
+  if (!session?.user) {
+    throw new Error("Unauthorized")
+  }
+
+  // Verify project ownership
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project || project.ownerId !== session.user.id) {
+    throw new Error("Project not found or unauthorized")
+  }
+
+  // Verify topic belongs to project
+  const [topic] = await db
+    .select()
+    .from(topics)
+    .where(and(eq(topics.id, topicId), eq(topics.projectId, projectId)))
+    .limit(1)
+
+  if (!topic) {
+    throw new Error("Topic not found")
+  }
+
+  // Delete topic (cascade will handle sourceTopics relations)
+  await db
+    .delete(topics)
+    .where(eq(topics.id, topicId))
+
+  revalidatePath(`/projects/${projectId}/sources`)
+}
+
+export async function mergeTopics(
+  projectId: string,
+  sourceTopicIds: string[],
+  targetTopicData: {
+    name: string
+    abbreviation?: string | null
+    color?: string
+  }
+) {
+  const session = await auth.api.getSession({ headers: await headers() })
+  
+  if (!session?.user) {
+    throw new Error("Unauthorized")
+  }
+
+  // Verify project ownership
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project || project.ownerId !== session.user.id) {
+    throw new Error("Project not found or unauthorized")
+  }
+
+  if (sourceTopicIds.length < 2) {
+    throw new Error("At least 2 topics must be selected for merging")
+  }
+
+  // Verify all topics belong to project
+  const allTopics = await db
+    .select()
+    .from(topics)
+    .where(and(
+      eq(topics.projectId, projectId),
+      inArray(topics.id, sourceTopicIds)
+    ))
+
+  if (allTopics.length !== sourceTopicIds.length) {
+    throw new Error("One or more topics not found")
+  }
+
+  // Create the merged topic
+  const [mergedTopic] = await db
+    .insert(topics)
+    .values({
+      projectId,
+      name: targetTopicData.name.trim(),
+      abbreviation: targetTopicData.abbreviation?.trim() || null,
+      color: targetTopicData.color || "#3b82f6",
+    })
+    .returning()
+
+  // Get all source-topic relations for the topics being merged
+  const sourceTopicRelations = await db
+    .select()
+    .from(sourceTopics)
+    .where(inArray(sourceTopics.topicId, sourceTopicIds))
+
+  // Group by sourceId and merge to avoid duplicates
+  const sourceIdToTopicIds = new Map<string, Set<string>>()
+  sourceTopicRelations.forEach((rel) => {
+    if (!sourceIdToTopicIds.has(rel.sourceId)) {
+      sourceIdToTopicIds.set(rel.sourceId, new Set())
+    }
+    sourceIdToTopicIds.get(rel.sourceId)!.add(rel.topicId)
+  })
+
+  // Update all source-topic relations to point to the merged topic
+  // First, remove existing relations for merged topics
+  await db
+    .delete(sourceTopics)
+    .where(inArray(sourceTopics.topicId, sourceTopicIds))
+
+  // Then, add new relations to merged topic (avoiding duplicates)
+  const newRelations = Array.from(sourceIdToTopicIds.keys()).map((sourceId) => ({
+    sourceId,
+    topicId: mergedTopic.id,
+  }))
+
+  if (newRelations.length > 0) {
+    // Remove duplicates by converting to Set and back
+    const uniqueRelations = Array.from(
+      new Map(newRelations.map(r => [`${r.sourceId}-${r.topicId}`, r])).values()
+    )
+    await db.insert(sourceTopics).values(uniqueRelations)
+  }
+
+  // Delete the source topics
+  await db
+    .delete(topics)
+    .where(inArray(topics.id, sourceTopicIds))
+
+  revalidatePath(`/projects/${projectId}/sources`)
+  return mergedTopic
 }
 
 export async function batchImportSources(
@@ -418,6 +635,21 @@ export async function batchImportSources(
       continue
     }
 
+    // Generate BibTeX if not provided
+    let bibtex = sourceData.bibtex?.trim() || null
+    if (!bibtex && sourceData.title) {
+      const bibtexEntry = sourceFieldsToBibtex({
+        abbreviation: sourceData.abbreviation || "",
+        title: sourceData.title,
+        authors: sourceData.authors || null,
+        publicationDate: sourceData.publicationDate || null,
+        description: sourceData.description || null,
+        notes: sourceData.notes || null,
+        links: sourceData.links || null,
+      })
+      bibtex = serializeBibtex(bibtexEntry)
+    }
+
     // Create the source
     const [newSource] = await db
       .insert(sources)
@@ -425,12 +657,12 @@ export async function batchImportSources(
         projectId,
         abbreviation: sourceData.abbreviation?.trim() || null,
         title: sourceData.title.trim(),
-        description: sourceData.description?.trim() || null,
+        description: sourceData.description || null, // Don't trim to preserve newlines
         authors: sourceData.authors?.trim() || null,
         publicationDate: normalizeDate(sourceData.publicationDate),
-        notes: sourceData.notes?.trim() || null,
-        links: sourceData.links?.trim() || null,
-        bibtex: sourceData.bibtex?.trim() || null,
+        notes: sourceData.notes || null, // Don't trim to preserve newlines
+        links: sourceData.links || null, // Don't trim links to preserve newlines
+        bibtex: bibtex,
       })
       .returning()
 
@@ -444,9 +676,9 @@ export async function batchImportSources(
         const topicNameLower = topicName.toLowerCase()
         let topicId = topicNameToId[topicNameLower]
 
-        // Create topic if it doesn't exist
+        // Create topic if it doesn't exist (default color is blue)
         if (!topicId) {
-          const color = sourceData.topicColors?.[topicName] || "#3b82f6"
+          const color = sourceData.topicColors?.[topicName] || "#3b82f6" // Default blue
           const abbreviation = sourceData.topicAbbreviations?.[topicName] || null
           const [newTopic] = await db
             .insert(topics)

@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useState, useCallback, useMemo } from "react"
 import { useTranslations } from "@/lib/i18n"
-import { getSources, getTopics, createSource, updateSource, deleteSource, createTopic, batchImportSources } from "@/app/actions/sources"
-import { getProject } from "@/app/actions/projects"
-import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
+import { parseBibtex, bibtexToSourceFields } from "@/lib/bibtex"
+import { useSources } from "@/hooks/use-sources"
+import { formatPublicationDate } from "@/lib/sources-utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -50,1055 +49,213 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload } from "lucide-react"
+import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { toast } from "sonner"
-import { useParams } from "next/navigation"
+import type { ColumnKey, Source } from "@/types/sources"
 
-type Source = {
-  id: string
-  projectId: string
-  abbreviation: string
-  title: string
-  description: string | null
-  authors: string | null
-  publicationDate: string | null
-  notes: string | null
-  links: string | null
-  bibtex: string | null
-  topics: Array<{
-    id: string
-    abbreviation: string
-    name: string
-    color: string
-  }>
-}
-
-type Topic = {
-  id: string
-  projectId: string
-  abbreviation: string
-  name: string
-  description: string | null
-  notes: string | null
-  color: string
-}
-
-type ColumnKey = "abbreviation" | "title" | "authors" | "publicationDate" | "topics" | "description" | "notes" | "links" | "bibtex"
-
-const COLUMN_ORDER: ColumnKey[] = ["abbreviation", "title", "authors", "publicationDate", "topics", "description", "notes", "links", "bibtex"]
-
-// Cookie helper functions
-function getCookie(name: string): string | null {
-  if (typeof document === "undefined") return null
-  const value = `; ${document.cookie}`
-  const parts = value.split(`; ${name}=`)
-  if (parts.length === 2) return parts.pop()?.split(";").shift() || null
-  return null
-}
-
-function setCookie(name: string, value: string, days = 365) {
-  if (typeof document === "undefined") return
-  const expires = new Date()
-  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000)
-  document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`
-}
-
-function loadPreferences(projectId: string) {
-  const prefix = `sources_prefs_${projectId}_`
-  const columnVisibility = getCookie(`${prefix}columnVisibility`)
-  const columnOrder = getCookie(`${prefix}columnOrder`)
-  const topicFilter = getCookie(`${prefix}topicFilter`)
-  const yearFromFilter = getCookie(`${prefix}yearFromFilter`)
-  const yearToFilter = getCookie(`${prefix}yearToFilter`)
-  const authorFilter = getCookie(`${prefix}authorFilter`)
-  const pageSize = getCookie(`${prefix}pageSize`)
-
-  return {
-    columnVisibility: columnVisibility ? JSON.parse(columnVisibility) : null,
-    columnOrder: columnOrder ? JSON.parse(columnOrder) : null,
-    topicFilter: topicFilter || null,
-    yearFromFilter: yearFromFilter || null,
-    yearToFilter: yearToFilter || null,
-    authorFilter: authorFilter || null,
-    pageSize: pageSize ? (pageSize === "all" ? "all" : parseInt(pageSize)) : null,
-  }
-}
-
-function savePreferences(projectId: string, prefs: {
-  columnVisibility?: Record<ColumnKey, boolean>
-  columnOrder?: ColumnKey[]
-  topicFilter?: string
-  yearFromFilter?: string
-  yearToFilter?: string
-  authorFilter?: string
-  pageSize?: number | "all"
-}) {
-  const prefix = `sources_prefs_${projectId}_`
-  if (prefs.columnVisibility) setCookie(`${prefix}columnVisibility`, JSON.stringify(prefs.columnVisibility))
-  if (prefs.columnOrder) setCookie(`${prefix}columnOrder`, JSON.stringify(prefs.columnOrder))
-  if (prefs.topicFilter !== undefined) setCookie(`${prefix}topicFilter`, prefs.topicFilter)
-  if (prefs.yearFromFilter !== undefined) setCookie(`${prefix}yearFromFilter`, prefs.yearFromFilter)
-  if (prefs.yearToFilter !== undefined) setCookie(`${prefix}yearToFilter`, prefs.yearToFilter)
-  if (prefs.authorFilter !== undefined) setCookie(`${prefix}authorFilter`, prefs.authorFilter)
-  if (prefs.pageSize !== undefined) setCookie(`${prefix}pageSize`, prefs.pageSize.toString())
-}
+const PREDEFINED_COLORS = [
+  { name: "Blue", value: "#3b82f6" },
+  { name: "Green", value: "#10b981" },
+  { name: "Dark Green", value: "#047857" },
+  { name: "Red", value: "#ef4444" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Yellow", value: "#eab308" },
+  { name: "Purple", value: "#a855f7" },
+  { name: "Pink", value: "#ec4899" },
+  { name: "Brown", value: "#92400e" },
+]
 
 export default function SourcesPage() {
-  const params = useParams()
-  const projectId = params.projectId as string
   const { t } = useTranslations()
-  
-  const [sources, setSources] = useState<Source[]>([])
-  const [topics, setTopics] = useState<Topic[]>([])
-  const [projectName, setProjectName] = useState<string>("")
-  const [loading, setLoading] = useState(true)
-  const [addDialogOpen, setAddDialogOpen] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [sourceToDelete, setSourceToDelete] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  
-  // Column visibility and order
-  const [columnVisibility, setColumnVisibility] = useState<Record<ColumnKey, boolean>>({
-    abbreviation: true,
-    title: true,
-    authors: true,
-    publicationDate: true,
-    topics: true,
-    description: true,
-    notes: true,
-    links: true,
-    bibtex: false,
-  })
-  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(COLUMN_ORDER)
-  const [draggedColumnIndex, setDraggedColumnIndex] = useState<number | null>(null)
-  const [dragOverColumnIndex, setDragOverColumnIndex] = useState<number | null>(null)
-  
-  // Filters and sorting
-  const [searchQuery, setSearchQuery] = useState("")
-  const [topicFilter, setTopicFilter] = useState<string>("all")
-  const [yearFromFilter, setYearFromFilter] = useState<string>("all")
-  const [yearToFilter, setYearToFilter] = useState<string>("all")
-  const [authorFilter, setAuthorFilter] = useState<string>("all")
-  const [sortColumn, setSortColumn] = useState<ColumnKey | null>(null)
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
-  
-  // Pagination
-  const [pageSize, setPageSize] = useState<number | "all">(25)
-  const [currentPage, setCurrentPage] = useState(1)
-  
-  // Editing state
-  const [editingCell, setEditingCell] = useState<{ sourceId: string; column: ColumnKey } | null>(null)
-  const [editValue, setEditValue] = useState("")
-  const [originalValue, setOriginalValue] = useState<string>("")
-  
-  // Add source form state
-  const [newSource, setNewSource] = useState({
-    abbreviation: "",
-    title: "",
-    authors: "",
-    publicationDate: "",
-    description: "",
-    notes: "",
-    links: "",
-    bibtex: "",
-    topicIds: [] as string[],
-  })
-  const [creating, setCreating] = useState(false)
-  const [createTopicDialogOpen, setCreateTopicDialogOpen] = useState(false)
-  const [newTopic, setNewTopic] = useState({
-    name: "",
-    abbreviation: "",
-    color: "#3b82f6",
-  })
-  const [customColor, setCustomColor] = useState(false)
-  
-  // Import/Export state
-  const [importDialogOpen, setImportDialogOpen] = useState(false)
-  const [importFile, setImportFile] = useState<File | null>(null)
-  const [importData, setImportData] = useState<Array<{
-    abbreviation?: string | null
-    title: string
-    description?: string | null
-    authors?: string | null
-    publicationDate?: string | null
-    notes?: string | null
-    links?: string | null
-    bibtex?: string | null
-    topicNames?: string[]
-    topicColors?: Record<string, string>
-    topicAbbreviations?: Record<string, string>
-  }>>([])
-  const [selectedImportIndices, setSelectedImportIndices] = useState<Set<number>>(new Set())
-  const [importing, setImporting] = useState(false)
-  const [existingBibtexSet, setExistingBibtexSet] = useState<Set<string>>(new Set())
-  
-  // Import dialog column settings
-  const [importColumnVisibility, setImportColumnVisibility] = useState<Record<ColumnKey, boolean>>({
-    abbreviation: true,
-    title: true,
-    authors: true,
-    publicationDate: true,
-    topics: true,
-    description: true,
-    notes: true,
-    links: true,
-    bibtex: true,
-  })
-  const [importColumnOrder, setImportColumnOrder] = useState<ColumnKey[]>(COLUMN_ORDER)
-  const [importDraggedColumnIndex, setImportDraggedColumnIndex] = useState<number | null>(null)
-  const [importDragOverColumnIndex, setImportDragOverColumnIndex] = useState<number | null>(null)
-
-  const predefinedColors = [
-    { name: "Blue", value: "#3b82f6" },
-    { name: "Green", value: "#10b981" },
-    { name: "Red", value: "#ef4444" },
-    { name: "Orange", value: "#f97316" },
-    { name: "Yellow", value: "#eab308" },
-    { name: "Purple", value: "#a855f7" },
-    { name: "Pink", value: "#ec4899" },
-  ]
-
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true)
-      const [sourcesData, topicsData, projectData] = await Promise.all([
-        getSources(projectId),
-        getTopics(projectId),
-        getProject(projectId),
-      ])
-      setSources(sourcesData as Source[])
-      setTopics(topicsData as Topic[])
-      if (projectData) {
-        setProjectName(projectData.title)
-      }
-    } catch (error) {
-      toast.error(t.errors.generic)
-      console.error(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [projectId, t.errors.generic])
-
-  // Load preferences from cookies on mount
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedPrefs = loadPreferences(projectId)
-      if (savedPrefs.columnVisibility) {
-        setColumnVisibility(savedPrefs.columnVisibility)
-      }
-      if (savedPrefs.columnOrder) {
-        setColumnOrder(savedPrefs.columnOrder)
-      }
-      if (savedPrefs.topicFilter) {
-        setTopicFilter(savedPrefs.topicFilter)
-      }
-      if (savedPrefs.yearFromFilter) {
-        setYearFromFilter(savedPrefs.yearFromFilter)
-      }
-      if (savedPrefs.yearToFilter) {
-        setYearToFilter(savedPrefs.yearToFilter)
-      }
-      if (savedPrefs.authorFilter) {
-        setAuthorFilter(savedPrefs.authorFilter)
-      }
-      if (savedPrefs.pageSize) {
-        setPageSize(savedPrefs.pageSize as number | "all")
-      }
-    }
-  }, [projectId])
-
-  useEffect(() => {
-    loadData()
-  }, [loadData])
-
-  // Save preferences to cookies when they change
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      savePreferences(projectId, {
-        columnVisibility,
-        columnOrder,
-        topicFilter,
-        yearFromFilter,
-        yearToFilter,
-        authorFilter,
-        pageSize,
-      })
-    }
-  }, [projectId, columnVisibility, columnOrder, topicFilter, yearFromFilter, yearToFilter, authorFilter, pageSize])
-
-  // Filter and sort sources
-  const filteredAndSortedSources = useMemo(() => {
-    let filtered = [...sources]
-
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      filtered = filtered.filter((source) => {
-        return (
-          source.abbreviation?.toLowerCase().includes(query) ||
-          source.title?.toLowerCase().includes(query) ||
-          source.authors?.toLowerCase().includes(query) ||
-          source.description?.toLowerCase().includes(query) ||
-          source.notes?.toLowerCase().includes(query) ||
-          source.links?.toLowerCase().includes(query) ||
-          source.bibtex?.toLowerCase().includes(query) ||
-          source.topics.some((t) => t.name.toLowerCase().includes(query))
-        )
-      })
-    }
-
-    // Topic filter
-    if (topicFilter !== "all") {
-      filtered = filtered.filter((source) =>
-        source.topics.some((t) => t.id === topicFilter)
-      )
-    }
-
-    // Year range filter
-    if (yearFromFilter !== "all" || yearToFilter !== "all") {
-      filtered = filtered.filter((source) => {
-        if (!source.publicationDate) return false
-        const year = parseInt(source.publicationDate.substring(0, 4))
-        const fromYear = yearFromFilter !== "all" ? parseInt(yearFromFilter) : null
-        const toYear = yearToFilter !== "all" ? parseInt(yearToFilter) : null
-        
-        if (fromYear !== null && toYear !== null) {
-          return year >= fromYear && year <= toYear
-        } else if (fromYear !== null) {
-          return year >= fromYear
-        } else if (toYear !== null) {
-          return year <= toYear
-        }
-        return true
-      })
-    }
-
-    // Author filter
-    if (authorFilter !== "all") {
-      filtered = filtered.filter((source) => {
-        if (!source.authors) return false
-        return source.authors.toLowerCase().includes(authorFilter.toLowerCase())
-      })
-    }
-
-    // Sorting
-    if (sortColumn) {
-      filtered.sort((a, b) => {
-        let aVal: string | null = null
-        let bVal: string | null = null
-
-        switch (sortColumn) {
-          case "abbreviation":
-            aVal = a.abbreviation
-            bVal = b.abbreviation
-            break
-          case "title":
-            aVal = a.title
-            bVal = b.title
-            break
-          case "authors":
-            aVal = a.authors
-            bVal = b.authors
-            break
-          case "publicationDate":
-            aVal = a.publicationDate
-            bVal = b.publicationDate
-            break
-          case "description":
-            aVal = a.description
-            bVal = b.description
-            break
-          case "notes":
-            aVal = a.notes
-            bVal = b.notes
-            break
-          case "links":
-            aVal = a.links
-            bVal = b.links
-            break
-          case "bibtex":
-            aVal = a.bibtex
-            bVal = b.bibtex
-            break
-        }
-
-        if (aVal === null && bVal === null) return 0
-        if (aVal === null) return 1
-        if (bVal === null) return -1
-
-        const comparison = aVal.localeCompare(bVal)
-        return sortDirection === "asc" ? comparison : -comparison
-      })
-    }
-
-    return filtered
-  }, [sources, searchQuery, topicFilter, yearFromFilter, yearToFilter, authorFilter, sortColumn, sortDirection])
-
-  // Pagination
-  const paginatedSources = useMemo(() => {
-    if (pageSize === "all") return filteredAndSortedSources
-    const start = (currentPage - 1) * pageSize
-    return filteredAndSortedSources.slice(start, start + pageSize)
-  }, [filteredAndSortedSources, pageSize, currentPage])
-
-  const totalPages = useMemo(() => {
-    if (pageSize === "all") return 1
-    return Math.ceil(filteredAndSortedSources.length / pageSize)
-  }, [filteredAndSortedSources.length, pageSize])
-
-  // Get unique years and authors for filters
-  const uniqueYears = useMemo(() => {
-    const years = new Set<string>()
-    sources.forEach((source) => {
-      if (source.publicationDate) {
-        const year = source.publicationDate.substring(0, 4)
-        if (year) years.add(year)
-      }
-    })
-    return Array.from(years).sort().reverse()
-  }, [sources])
-
-  const uniqueAuthors = useMemo(() => {
-    const authors = new Set<string>()
-    sources.forEach((source) => {
-      if (source.authors) {
-        // Split by comma and add each author
-        source.authors.split(",").forEach((author) => {
-          const trimmed = author.trim()
-          if (trimmed) authors.add(trimmed)
-        })
-      }
-    })
-    return Array.from(authors).sort()
-  }, [sources])
-
-  const handleCellDoubleClick = (sourceId: string, column: ColumnKey, currentValue: string | null) => {
-    setEditingCell({ sourceId, column })
-    const value = currentValue || ""
-    setEditValue(value)
-    setOriginalValue(value)
-  }
-
-  const handleCellCancel = () => {
-    // Reset to original value and close editing
-    setEditValue(originalValue)
-    setEditingCell(null)
-    setOriginalValue("")
-  }
-
-  const handleCellSave = async () => {
-    if (!editingCell) return
-
-    const source = sources.find((s) => s.id === editingCell.sourceId)
-    if (!source) return
-
-    try {
-      const updateData: {
-        abbreviation?: string
-        title?: string
-        description?: string | null
-        authors?: string | null
-        publicationDate?: string | null
-        notes?: string | null
-        links?: string | null
-        bibtex?: string | null
-        topicIds?: string[]
-      } = { [editingCell.column]: editValue || null }
-
-      // Handle BibTeX sync
-      if (editingCell.column === "bibtex") {
-        const parsed = parseBibtex(editValue)
-        if (parsed) {
-          const fields = bibtexToSourceFields(parsed)
-          updateData.title = fields.title || source.title
-          updateData.authors = fields.authors || source.authors
-          updateData.publicationDate = fields.publicationDate || source.publicationDate
-          updateData.abbreviation = fields.abbreviation || source.abbreviation
-        }
-      } else {
-        // If editing a field, check if we should update BibTeX
-        const currentBibtex = source.bibtex ? parseBibtex(source.bibtex) : null
-        if (currentBibtex) {
-          const sourceFields = {
-            title: editingCell.column === "title" ? editValue : source.title,
-            authors: editingCell.column === "authors" ? editValue : source.authors,
-            publicationDate: editingCell.column === "publicationDate" ? editValue : source.publicationDate,
-          }
-          
-          // Check if BibTeX matches current source fields (before edit)
-          const beforeEdit = {
-            title: source.title,
-            authors: source.authors ?? undefined,
-            publicationDate: source.publicationDate ?? undefined,
-          }
-          
-          if (bibtexFieldsMatch(currentBibtex, currentBibtex, beforeEdit)) {
-            // Update BibTeX to match new values
-            const newBibtex = sourceFieldsToBibtex({
-              abbreviation: source.abbreviation,
-              title: sourceFields.title || "",
-              authors: sourceFields.authors || null,
-              publicationDate: sourceFields.publicationDate || null,
-              description: source.description,
-              notes: source.notes,
-              links: source.links,
-            })
-            updateData.bibtex = serializeBibtex(newBibtex)
-          }
-        }
-      }
-
-      await updateSource(projectId, editingCell.sourceId, updateData)
-      
-      // Update local state without reloading
-      setSources((prevSources) =>
-        prevSources.map((s) => {
-          if (s.id === editingCell.sourceId) {
-            const updated = { ...s, ...updateData }
-            // If BibTeX was updated, we might need to update other fields too
-            if (updateData.bibtex && editingCell.column === "bibtex") {
-              const parsed = parseBibtex(updateData.bibtex)
-              if (parsed) {
-                const fields = bibtexToSourceFields(parsed)
-                if (fields.title) updated.title = fields.title
-                if (fields.authors) updated.authors = fields.authors
-                if (fields.publicationDate) updated.publicationDate = fields.publicationDate
-                if (fields.abbreviation) updated.abbreviation = fields.abbreviation
-              }
-            }
-            return updated
-          }
-          return s
-        })
-      )
-      
-      toast.success(t.sources.sourceUpdated)
-      setEditingCell(null)
-      setEditValue("")
-      setOriginalValue("")
-    } catch (error) {
-      toast.error(t.errors.generic)
-      console.error(error)
-    }
-  }
-
-  const handleDeleteClick = (sourceId: string) => {
-    setSourceToDelete(sourceId)
-    setDeleteDialogOpen(true)
-  }
-
-  const handleDeleteConfirm = async () => {
-    if (!sourceToDelete) return
-
-    try {
-      setDeleting(true)
-      await deleteSource(projectId, sourceToDelete)
-      toast.success(t.sources.sourceDeleted)
-      setDeleteDialogOpen(false)
-      setSourceToDelete(null)
-      await loadData()
-    } catch (error) {
-      toast.error(t.errors.generic)
-      console.error(error)
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  const handleCopyBibtex = async (bibtex: string | null) => {
-    if (!bibtex) {
-      toast.error("No BibTeX available")
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(bibtex)
-      toast.success(t.sources.bibtexCopied)
-    } catch (error) {
-      toast.error("Failed to copy BibTeX")
-    }
-  }
-
-  const handleAddSource = async () => {
-    try {
-      setCreating(true)
-      
-      const sourceData = { ...newSource }
-      
-      // If BibTeX is provided, parse it and merge with form data
-      if (newSource.bibtex.trim()) {
-        const parsed = parseBibtex(newSource.bibtex)
-        if (parsed) {
-          const bibtexFields = bibtexToSourceFields(parsed)
-          // Only use BibTeX values if form fields are empty
-          if (!sourceData.abbreviation && bibtexFields.abbreviation) {
-            sourceData.abbreviation = bibtexFields.abbreviation
-          }
-          if (!sourceData.title && bibtexFields.title) {
-            sourceData.title = bibtexFields.title
-          }
-          if (!sourceData.authors && bibtexFields.authors) {
-            sourceData.authors = bibtexFields.authors
-          }
-          if (!sourceData.publicationDate && bibtexFields.publicationDate) {
-            sourceData.publicationDate = bibtexFields.publicationDate
-          }
-        }
-      } else {
-        // If no BibTeX but form fields are filled, generate BibTeX
-        if (sourceData.title) {
-          const bibtexEntry = sourceFieldsToBibtex({
-            abbreviation: sourceData.abbreviation || "",
-            title: sourceData.title,
-            authors: sourceData.authors || null,
-            publicationDate: sourceData.publicationDate || null,
-            description: sourceData.description || null,
-            notes: sourceData.notes || null,
-            links: sourceData.links || null,
-          })
-          sourceData.bibtex = serializeBibtex(bibtexEntry)
-        }
-      }
-
-      await createSource(projectId, {
-        abbreviation: sourceData.abbreviation || null,
-        title: sourceData.title,
-        description: sourceData.description || null,
-        authors: sourceData.authors || null,
-        publicationDate: sourceData.publicationDate || null,
-        notes: sourceData.notes || null,
-        links: sourceData.links || null,
-        bibtex: sourceData.bibtex || null,
-        topicIds: sourceData.topicIds,
-      })
-      
-      toast.success(t.sources.sourceCreated)
-      setAddDialogOpen(false)
-      setNewSource({
-        abbreviation: "",
-        title: "",
-        authors: "",
-        publicationDate: "",
-        description: "",
-        notes: "",
-        links: "",
-        bibtex: "",
-        topicIds: [],
-      })
-      await loadData()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.errors.generic)
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const handleCreateTopic = async () => {
-    try {
-      const topic = await createTopic(projectId, {
-        abbreviation: newTopic.abbreviation || null,
-        name: newTopic.name,
-        color: newTopic.color,
-      })
-      setTopics([...topics, topic as Topic])
-      setCreateTopicDialogOpen(false)
-      setNewTopic({ name: "", abbreviation: "", color: "#3b82f6" })
-      setCustomColor(false)
-      toast.success("Topic created successfully")
-    } catch (error) {
-      toast.error(t.errors.generic)
-    }
-  }
-
-  const handleSort = (column: ColumnKey) => {
-    if (sortColumn === column) {
-      if (sortDirection === "asc") {
-        setSortDirection("desc")
-      } else {
-        setSortColumn(null)
-        setSortDirection("asc")
-      }
-    } else {
-      setSortColumn(column)
-      setSortDirection("asc")
-    }
-  }
+  const {
+    sources,
+    topics,
+    loading,
+    filteredAndSortedSources,
+    paginatedSources,
+    totalPages,
+    uniqueYears,
+    uniqueAuthors,
+    visibleColumns,
+    addDialogOpen,
+    setAddDialogOpen,
+    deleteDialogOpen,
+    setDeleteDialogOpen,
+    deleting,
+    deleteAllDialogOpen,
+    setDeleteAllDialogOpen,
+    deletingAll,
+    selectedDeleteSourceIds,
+    setSelectedDeleteSourceIds,
+    columnVisibility,
+    setColumnVisibility,
+    columnOrder,
+    setColumnOrder,
+    draggedColumnIndex,
+    setDraggedColumnIndex,
+    dragOverColumnIndex,
+    setDragOverColumnIndex,
+    searchQuery,
+    setSearchQuery,
+    topicFilter,
+    setTopicFilter,
+    yearFromFilter,
+    setYearFromFilter,
+    yearToFilter,
+    setYearToFilter,
+    authorFilter,
+    setAuthorFilter,
+    sortColumn,
+    pageSize,
+    setPageSize,
+    currentPage,
+    setCurrentPage,
+    editingCell,
+    editValue,
+    setEditValue,
+    newSource,
+    setNewSource,
+    creating,
+    createTopicDialogOpen,
+    setCreateTopicDialogOpen,
+    newTopic,
+    setNewTopic,
+    customColor,
+    setCustomColor,
+    importDialogOpen,
+    setImportDialogOpen,
+    importFile,
+    setImportFile,
+    importType,
+    setImportType,
+    importData,
+    setImportData,
+    selectedImportIndices,
+    setSelectedImportIndices,
+    importing,
+    existingBibtexSet,
+    importColumnVisibility,
+    setImportColumnVisibility,
+    importColumnOrder,
+    setImportColumnOrder,
+    importDraggedColumnIndex,
+    setImportDraggedColumnIndex,
+    importDragOverColumnIndex,
+    setImportDragOverColumnIndex,
+    handleCellDoubleClick,
+    handleCellCancel,
+    handleCellSave,
+    handleDeleteClick,
+    handleDeleteConfirm,
+    handleDeleteAllClick,
+    handleDeleteAllConfirm,
+    handleCopyBibtex,
+    handleAddSource,
+    handleCreateTopic,
+    handleSort,
+    handleFileSelect,
+    handleExcludeExisting,
+    handleImport,
+    handleExportCSV,
+    handleExportJSON,
+    handleUpdateSourceTopics,
+    bibtexExportDialogOpen,
+    setBibtexExportDialogOpen,
+    selectedBibtexExportSourceIds,
+    setSelectedBibtexExportSourceIds,
+    bibtexExportTopicFilter,
+    setBibtexExportTopicFilter,
+    bibtexExportColumnVisibility,
+    setBibtexExportColumnVisibility,
+    handleOpenBibtexExport,
+    handleCopyBibtexToClipboard,
+    handleDownloadBibtexFile,
+    manageTopicsDialogOpen,
+    setManageTopicsDialogOpen,
+    editingTopic,
+    setEditingTopic,
+    editingTopicData,
+    setEditingTopicData,
+    handleUpdateTopic,
+    handleDeleteTopic,
+    mergingTopics,
+    selectedTopicsToMerge,
+    setSelectedTopicsToMerge,
+    mergeTopicData,
+    setMergeTopicData,
+    handleMergeTopics,
+  } = useSources()
 
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
   }
 
-  // Sanitize filename - remove invalid characters for Windows, macOS, Linux
-  const sanitizeFilename = (name: string): string => {
-    // Remove Windows reserved characters: < > : " / \ | ? *
-    // Remove control characters (char codes < 32)
-    // Remove trailing spaces and dots (Windows restriction)
-    let sanitized = name
-      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
-      .replace(/[\s.]+$/, "")
-      .trim()
-    
-    // If empty after sanitization, use a default
-    if (!sanitized) {
-      sanitized = "project"
-    }
-    
-    return sanitized
-  }
-
-  // Export functions
-  const exportToCSV = () => {
-    const headers = ["abbreviation", "title", "authors", "publicationDate", "description", "notes", "links", "bibtex", "topics"]
-    const rows = filteredAndSortedSources.map((source) => {
-      const topicsStr = source.topics.map((t) => {
-        if (t.abbreviation) {
-          return `${t.name} (${t.abbreviation})`
-        }
-        return t.name
-      }).join("; ")
-      return [
-        source.abbreviation || "",
-        source.title || "",
-        source.authors || "",
-        source.publicationDate || "",
-        source.description || "",
-        source.notes || "",
-        source.links || "",
-        source.bibtex || "",
-        topicsStr,
-      ]
-    })
-
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((row) =>
-        row.map((cell) => {
-          const str = String(cell || "")
-          // Escape quotes and wrap in quotes if contains comma, newline, or quote
-          if (str.includes(",") || str.includes("\n") || str.includes('"')) {
-            return `"${str.replace(/"/g, '""')}"`
-          }
-          return str
-        }).join(",")
-      ),
-    ].join("\n")
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
-    const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    link.setAttribute("href", url)
-    const sanitizedProjectName = sanitizeFilename(projectName)
-    const sourcesWord = t.sources.title.toLowerCase()
-    const dateStr = new Date().toISOString().split("T")[0]
-    link.setAttribute("download", `${sanitizedProjectName}_${sourcesWord}_${dateStr}.csv`)
-    link.style.visibility = "hidden"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
-  const exportToJSON = () => {
-    const jsonData = filteredAndSortedSources.map((source) => {
-      const topics = source.topics.map((t) => ({
-        name: t.name,
-        abbreviation: t.abbreviation || null,
-        color: t.color,
-      }))
-      return {
-        abbreviation: source.abbreviation,
-        title: source.title,
-        authors: source.authors,
-        publicationDate: source.publicationDate,
-        description: source.description,
-        notes: source.notes,
-        links: source.links,
-        bibtex: source.bibtex,
-        topics,
-      }
-    })
-
-    const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: "application/json" })
-    const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    link.setAttribute("href", url)
-    const sanitizedProjectName = sanitizeFilename(projectName)
-    const sourcesWord = t.sources.title.toLowerCase()
-    const dateStr = new Date().toISOString().split("T")[0]
-    link.setAttribute("download", `${sanitizedProjectName}_${sourcesWord}_${dateStr}.json`)
-    link.style.visibility = "hidden"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
-  // Import functions
-  const parseCSV = (csvText: string): Array<Record<string, string>> => {
-    if (!csvText.trim()) return []
-
-    const rows: string[][] = []
-    let currentRow: string[] = []
-    let currentValue = ""
-    let inQuotes = false
-
-    for (let i = 0; i < csvText.length; i++) {
-      const char = csvText[i]
-      const nextChar = csvText[i + 1]
-
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          // Escaped quote
-          currentValue += '"'
-          i++
-        } else {
-          // Toggle quote state
-          inQuotes = !inQuotes
-        }
-      } else if (char === "," && !inQuotes) {
-        // Field separator
-        currentRow.push(currentValue.trim())
-        currentValue = ""
-      } else if ((char === "\n" || char === "\r") && !inQuotes) {
-        // Row separator (only if not in quotes)
-        if (char === "\r" && nextChar === "\n") {
-          i++ // Skip \r\n
-        }
-        if (currentValue.trim() || currentRow.length > 0) {
-          currentRow.push(currentValue.trim())
-          if (currentRow.some(v => v.length > 0)) {
-            rows.push(currentRow)
-          }
-          currentRow = []
-          currentValue = ""
-        }
-      } else {
-        currentValue += char
-      }
-    }
-
-    // Add last row
-    if (currentValue.trim() || currentRow.length > 0) {
-      currentRow.push(currentValue.trim())
-      if (currentRow.some(v => v.length > 0)) {
-        rows.push(currentRow)
-      }
-    }
-
-    if (rows.length === 0) return []
-
-    // First row is headers
-    const headers = rows[0].map(h => h.trim())
-    const dataRows: Array<Record<string, string>> = []
-
-    for (let i = 1; i < rows.length; i++) {
-      const row: Record<string, string> = {}
-      headers.forEach((header, index) => {
-        // Remove surrounding quotes if present
-        let value = rows[i][index] || ""
-        if (value.startsWith('"') && value.endsWith('"')) {
-          value = value.slice(1, -1).replace(/""/g, '"')
-        }
-        row[header] = value
-      })
-      dataRows.push(row)
-    }
-
-    return dataRows
-  }
-
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    setImportFile(file)
-    const text = await file.text()
-
-    try {
-      type ParsedRow = Record<string, unknown> & {
-        abbreviation?: string
-        title?: string
-        authors?: string
-        publicationDate?: string
-        description?: string
-        notes?: string
-        links?: string
-        bibtex?: string
-        topics?: string | Array<string | { name?: string; color?: string; abbreviation?: string }>
-      }
-      
-      let parsedData: ParsedRow[] = []
-
-      if (file.name.endsWith(".csv")) {
-        parsedData = parseCSV(text) as ParsedRow[]
-      } else if (file.name.endsWith(".json")) {
-        parsedData = JSON.parse(text) as ParsedRow[]
-      } else {
-        toast.error(t.sources.import.invalidFile)
-        return
-      }
-
-      // Convert to import format
-      const importSources: typeof importData = parsedData.map((row: ParsedRow) => {
-        let topics: string[] = []
-        const topicColors: Record<string, string> = {}
-        const topicAbbreviations: Record<string, string> = {}
-        
-        if (row.topics) {
-          if (typeof row.topics === "string") {
-            // CSV format: "name (abbrev); name (abbrev)" or "name; name"
-            topics = row.topics.split(";").map((t: string) => {
-              const trimmed = t.trim()
-              if (!trimmed) return null
-              // Parse "name (abbrev)" format
-              const match = trimmed.match(/^(.+?)\s*\((.+?)\)$/)
-              if (match) {
-                const name = match[1].trim()
-                const abbrev = match[2].trim()
-                topicAbbreviations[name] = abbrev
-                return name
-              }
-              return trimmed
-            }).filter((t: string | null): t is string => t !== null)
-          } else if (Array.isArray(row.topics)) {
-            // JSON format
-            topics = row.topics.map((t: string | { name?: string; color?: string; abbreviation?: string }) => {
-              if (typeof t === "string") {
-                return t
-              } else if (t.name) {
-                if (t.color) {
-                  topicColors[t.name] = t.color
-                }
-                if (t.abbreviation) {
-                  topicAbbreviations[t.name] = t.abbreviation
-                }
-                return t.name
-              }
-              return null
-            }).filter((t: string | null): t is string => t !== null)
-          }
-        }
-
-        return {
-          abbreviation: row.abbreviation || null,
-          title: row.title || "",
-          authors: row.authors || null,
-          publicationDate: row.publicationDate || null,
-          description: row.description || null,
-          notes: row.notes || null,
-          links: row.links || null,
-          bibtex: row.bibtex || null,
-          topicNames: topics,
-          topicColors,
-          topicAbbreviations,
-        }
-      })
-
-      setImportData(importSources)
-      setSelectedImportIndices(new Set(importSources.map((_, index) => index)))
-
-      // Get existing bibtex
-      const existingBibtex = new Set(sources.filter((s) => s.bibtex).map((s) => s.bibtex!.trim()))
-      setExistingBibtexSet(existingBibtex)
-    } catch (error) {
-      toast.error(t.sources.import.invalidFile)
-      console.error(error)
-    }
-  }
-
-  const handleExcludeExisting = () => {
-    const newSelected = new Set<number>()
-    importData.forEach((source, index) => {
-      if (!source.bibtex || !existingBibtexSet.has(source.bibtex.trim())) {
-        newSelected.add(index)
-      }
-    })
-    setSelectedImportIndices(newSelected)
-  }
-
-  const handleImport = async () => {
-    if (selectedImportIndices.size === 0) {
-      toast.error(t.sources.import.noSourcesToImport)
-      return
-    }
-
-    try {
-      setImporting(true)
-      const sourcesToImport = Array.from(selectedImportIndices).map((index) => importData[index])
-      await batchImportSources(projectId, sourcesToImport)
-      toast.success(t.sources.import.importSuccess)
-      setImportDialogOpen(false)
-      setImportFile(null)
-      setImportData([])
-      setSelectedImportIndices(new Set())
-      await loadData()
-    } catch (error) {
-      toast.error(t.sources.import.importError)
-      console.error(error)
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  // Format publication date to show only what's entered
-  // The database stores dates as YYYY-MM-DD (normalized), but we want to show only what user entered
-  // We'll check the original input by looking at the stored format
-  const formatPublicationDate = (date: string | null): string => {
-    if (!date) return "-"
-    
-    // If it's just a year (YYYY) - 4 digits only
-    if (/^\d{4}$/.test(date)) {
-      return date
-    }
-    
-    // If it's year-month (YYYY-MM) - 7 characters, ends with -MM
-    if (/^\d{4}-\d{2}$/.test(date)) {
-      return date
-    }
-    
-    // If it's full date (YYYY-MM-DD)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      const [year, month, day] = date.split("-")
-      // If day is 01, it was likely entered as YYYY-MM, so show that
-      if (day === "01") {
-        // Check if month is 01 too - then it was likely just a year
-        if (month === "01") {
-          return year
-        }
-        return `${year}-${month}`
-      }
-      // Otherwise show full date
-      return date
-    }
-    
-    return date
-  }
-
-  // Render links as clickable with newlines
+  // Render links as free text with auto-clickable URLs, preserving newlines
   const renderLinks = (links: string | null): React.ReactNode => {
     if (!links) return "-"
-    const linkArray = links.split(",").map(link => link.trim()).filter(link => link)
+    
+    // URL regex pattern
+    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi
+    
+    // Split by newlines to preserve line breaks
+    const lines = links.split(/\r?\n/)
+    
     return (
-      <div className="flex flex-col gap-1">
-        {linkArray.map((link, index) => {
-          // Ensure link has protocol
-          const url = link.startsWith("http://") || link.startsWith("https://") ? link : `https://${link}`
-          return (
-            <a
-              key={index}
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline break-all"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {link}
-            </a>
-          )
+      <div className="flex flex-col gap-1 whitespace-pre-wrap break-words">
+        {lines.map((line, lineIndex) => {
+          if (!line.trim()) {
+            return <br key={lineIndex} />
+          }
+          
+          const parts: React.ReactNode[] = []
+          let lastIndex = 0
+          let match: RegExpExecArray | null
+          
+          // Reset regex
+          urlRegex.lastIndex = 0
+          
+          while ((match = urlRegex.exec(line)) !== null) {
+            // Add text before the URL
+            if (match.index > lastIndex) {
+              parts.push(line.substring(lastIndex, match.index))
+            }
+            
+            // Add clickable URL
+            const url = match[0].startsWith("http://") || match[0].startsWith("https://") 
+              ? match[0] 
+              : `https://${match[0]}`
+            
+            parts.push(
+              <a
+                key={`${lineIndex}-${match.index}`}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline break-all"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {match[0]}
+              </a>
+            )
+            
+            lastIndex = match.index + match[0].length
+          }
+          
+          // Add remaining text after last URL
+          if (lastIndex < line.length) {
+            parts.push(line.substring(lastIndex))
+          }
+          
+          // If no URLs found, just return the line as text
+          if (parts.length === 0) {
+            return <span key={lineIndex}>{line}</span>
+          }
+          
+          return <div key={lineIndex}>{parts}</div>
         })}
       </div>
     )
   }
-
-  const visibleColumns = columnOrder.filter((col) => columnVisibility[col])
 
   if (loading) {
     return (
@@ -1117,9 +274,9 @@ export default function SourcesPage() {
         <p className="text-muted-foreground mt-1">{t.sources.manageSources}</p>
       </div>
 
-      {/* Filters and Search */}
-      <div className="mb-4 space-y-2">
-        <div className="flex flex-wrap items-center gap-4">
+      {/* Table Operations: Search, Filters, Column Settings */}
+      <div className="mb-4 p-4 border rounded-lg bg-muted/30">
+        <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-[200px]">
             <Label className="text-xs text-muted-foreground mb-1 block">Search</Label>
             <div className="relative">
@@ -1135,28 +292,28 @@ export default function SourcesPage() {
               />
             </div>
           </div>
-          
+
           <div>
             <Label className="text-xs text-muted-foreground mb-1 block">Topic</Label>
             <Select value={topicFilter} onValueChange={(v) => { setTopicFilter(v); setCurrentPage(1) }}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder={t.sources.filters.topic} />
               </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t.sources.filters.all}</SelectItem>
-            {topics.map((topic) => (
-              <SelectItem key={topic.id} value={topic.id}>
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-3 h-3 rounded-full border border-border"
-                    style={{ backgroundColor: topic.color }}
-                  />
-                  <span>{topic.name}</span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              <SelectContent>
+                <SelectItem value="all">{t.sources.filters.all}</SelectItem>
+                {topics.map((topic) => (
+                  <SelectItem key={topic.id} value={topic.id}>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full border border-border"
+                        style={{ backgroundColor: topic.color }}
+                      />
+                      <span>{topic.name}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
@@ -1165,15 +322,15 @@ export default function SourcesPage() {
               <SelectTrigger className="w-[120px]">
                 <SelectValue placeholder={t.sources.filters.yearFrom} />
               </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t.sources.filters.all}</SelectItem>
-            {uniqueYears.map((year) => (
-              <SelectItem key={year} value={year}>
-                {year}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              <SelectContent>
+                <SelectItem value="all">{t.sources.filters.all}</SelectItem>
+                {uniqueYears.map((year) => (
+                  <SelectItem key={year} value={year}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
@@ -1182,15 +339,15 @@ export default function SourcesPage() {
               <SelectTrigger className="w-[120px]">
                 <SelectValue placeholder={t.sources.filters.yearTo} />
               </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t.sources.filters.all}</SelectItem>
-            {uniqueYears.map((year) => (
-              <SelectItem key={year} value={year}>
-                {year}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              <SelectContent>
+                <SelectItem value="all">{t.sources.filters.all}</SelectItem>
+                {uniqueYears.map((year) => (
+                  <SelectItem key={year} value={year}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
@@ -1199,58 +356,25 @@ export default function SourcesPage() {
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder={t.sources.filters.author} />
               </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t.sources.filters.all}</SelectItem>
-            {uniqueAuthors.map((author) => (
-              <SelectItem key={author} value={author}>
-                {author}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+              <SelectContent>
+                <SelectItem value="all">{t.sources.filters.all}</SelectItem>
+                {uniqueAuthors.map((author) => (
+                  <SelectItem key={author} value={author}>
+                    {author}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Label className="text-xs text-muted-foreground mb-1 block opacity-0">Add</Label>
-            <div className="flex gap-2">
-              <Button onClick={() => setAddDialogOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t.sources.addSource}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Settings2 className="mr-2 h-4 w-4" />
+                {t.sources.columnSettings.title}
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <Download className="mr-2 h-4 w-4" />
-                    {t.sources.export.download}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={exportToCSV}>
-                    {t.sources.export.csv}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={exportToJSON}>
-                    {t.sources.export.json}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
-                <Upload className="mr-2 h-4 w-4" />
-                {t.sources.import.import}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Column Settings */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="mb-4">
-            <Settings2 className="mr-2 h-4 w-4" />
-            {t.sources.columnSettings.title}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-80">
+            </PopoverTrigger>
+            <PopoverContent className="w-80">
           <div className="space-y-4">
             <div>
               <Label className="text-sm font-medium">{t.sources.columnSettings.showHide}</Label>
@@ -1337,6 +461,68 @@ export default function SourcesPage() {
           </div>
         </PopoverContent>
       </Popover>
+        </div>
+      </div>
+
+      {/* Actions: Add, Import, Export, Delete */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button onClick={() => setAddDialogOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          {t.sources.addSource}
+        </Button>
+        <Button variant="outline" onClick={() => setManageTopicsDialogOpen(true)}>
+          <Tag className="mr-2 h-4 w-4" />
+          Manage Topics
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline">
+              <Download className="mr-2 h-4 w-4" />
+              {t.sources.export.download}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleExportCSV}>
+              {t.sources.export.csv}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportJSON}>
+              {t.sources.export.json}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleOpenBibtexExport}>
+              <FileText className="mr-2 h-4 w-4" />
+              BibTeX
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline">
+              <Upload className="mr-2 h-4 w-4" />
+              {t.sources.import.import}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => { setImportType("csv"); setImportDialogOpen(true); }}>
+              CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { setImportType("json"); setImportDialogOpen(true); }}>
+              JSON
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { setImportType("miro-csv"); setImportDialogOpen(true); }}>
+              Custom Miro CSV
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button 
+          variant="destructive" 
+          onClick={handleDeleteAllClick}
+          disabled={sources.length === 0}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Delete All Sources
+        </Button>
+      </div>
 
       {/* Table */}
       {sources.length === 0 ? (
@@ -1392,25 +578,23 @@ export default function SourcesPage() {
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
-                                {(col === "bibtex" || col === "description" || col === "notes") ? (
+                                {(col === "bibtex" || col === "description" || col === "notes" || col === "links") ? (
                                   <Textarea
                                     value={editValue}
                                     onChange={(e) => setEditValue(e.target.value)}
                                     onBlur={(e) => {
-                                      // Only save if the blur is not caused by clicking the cancel button
                                       if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).closest('button[title="Cancel"]')) {
                                         handleCellSave()
                                       }
                                     }}
                                     onKeyDown={(e) => {
-                                      if (e.key === "Enter" && !e.shiftKey) {
+                                      if (e.key === "Enter" && !e.shiftKey && col !== "links") {
                                         e.preventDefault()
                                         handleCellSave()
                                       } else if (e.key === "Escape") {
                                         e.preventDefault()
                                         handleCellCancel()
                                       }
-                                      // Shift+Enter allows new line (default behavior)
                                     }}
                                     autoFocus
                                     rows={col === "bibtex" ? 6 : 3}
@@ -1421,7 +605,6 @@ export default function SourcesPage() {
                                     value={editValue}
                                     onChange={(e) => setEditValue(e.target.value)}
                                     onBlur={(e) => {
-                                      // Only save if the blur is not caused by clicking the cancel button
                                       if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).closest('button[title="Cancel"]')) {
                                         handleCellSave()
                                       }
@@ -1443,7 +626,6 @@ export default function SourcesPage() {
                                   size="icon"
                                   className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-colors"
                                   onMouseDown={(e) => {
-                                    // Prevent blur event from firing on the input
                                     e.preventDefault()
                                   }}
                                   onClick={handleCellCancel}
@@ -1493,38 +675,8 @@ export default function SourcesPage() {
                                               const newTopicIds = checked
                                                 ? [...currentTopicIds, topic.id]
                                                 : currentTopicIds.filter((id) => id !== topic.id)
-                                              
-                                              await updateSource(projectId, source.id, { topicIds: newTopicIds })
-                                              
-                                              // Update local state without reloading
-                                              setSources((prevSources) =>
-                                                prevSources.map((s) => {
-                                                  if (s.id === source.id) {
-                                                    // Get the topic data for the new topic IDs
-                                                    const newTopics = newTopicIds
-                                                      .map((topicId) => {
-                                                        const topicData = topics.find((t) => t.id === topicId)
-                                                        return topicData
-                                                          ? {
-                                                              id: topicData.id,
-                                                              abbreviation: topicData.abbreviation,
-                                                              name: topicData.name,
-                                                              color: topicData.color,
-                                                            }
-                                                          : null
-                                                      })
-                                                      .filter((t): t is NonNullable<typeof t> => t !== null)
-                                                    
-                                                    return {
-                                                      ...s,
-                                                      topics: newTopics,
-                                                    }
-                                                  }
-                                                  return s
-                                                })
-                                              )
-                                              
-                                              toast.success(t.sources.sourceUpdated)
+
+                                              handleUpdateSourceTopics(source.id, newTopicIds)
                                             }}
                                           />
                                           <Label className="flex items-center gap-2 cursor-pointer">
@@ -1790,7 +942,6 @@ export default function SourcesPage() {
                 value={newSource.bibtex}
                 onChange={(e) => {
                   setNewSource({ ...newSource, bibtex: e.target.value })
-                  // Auto-fill fields from BibTeX if they're empty
                   if (e.target.value.trim()) {
                     const parsed = parseBibtex(e.target.value)
                     if (parsed) {
@@ -1875,7 +1026,7 @@ export default function SourcesPage() {
               <Label htmlFor="topicColor">{t.sources.addDialog.topicColor}</Label>
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
-                  {predefinedColors.map((color) => (
+                  {PREDEFINED_COLORS.map((color) => (
                     <button
                       key={color.value}
                       type="button"
@@ -1894,16 +1045,16 @@ export default function SourcesPage() {
                   ))}
                   <button
                     type="button"
-                      onClick={() => setCustomColor(true)}
-                      className={`w-10 h-10 rounded-md border-2 transition-all flex items-center justify-center ${
-                        customColor
-                          ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
-                          : "border-border hover:border-foreground/50"
-                      }`}
-                      title="Custom"
-                    >
-                      <span className="text-xs">+</span>
-                    </button>
+                    onClick={() => setCustomColor(true)}
+                    className={`w-10 h-10 rounded-md border-2 transition-all flex items-center justify-center ${
+                      customColor
+                        ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
+                        : "border-border hover:border-foreground/50"
+                    }`}
+                    title="Custom"
+                  >
+                    <span className="text-xs">+</span>
+                  </button>
                 </div>
                 {customColor && (
                   <div className="flex items-center gap-2">
@@ -1975,6 +1126,257 @@ export default function SourcesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Delete All Sources Dialog */}
+      <Dialog open={deleteAllDialogOpen} onOpenChange={setDeleteAllDialogOpen}>
+        <DialogContent className="!max-w-[98vw] !w-[98vw] max-h-[95vh] overflow-hidden !flex !flex-col">
+          <DialogHeader>
+            <DialogTitle>Delete Sources</DialogTitle>
+            <DialogDescription>
+              Select the sources you want to delete. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                {selectedDeleteSourceIds.size} source{selectedDeleteSourceIds.size !== 1 ? 's' : ''} selected for deletion
+              </div>
+              <div className="flex gap-2 items-center">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    setSelectedDeleteSourceIds(new Set(sources.map(s => s.id)))
+                  }}
+                >
+                  Select All
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    setSelectedDeleteSourceIds(new Set())
+                  }}
+                >
+                  Deselect All
+                </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Settings2 className="mr-2 h-4 w-4" />
+                      {t.sources.columnSettings.title}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80">
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm font-medium">{t.sources.columnSettings.showHide}</Label>
+                        <p className="text-xs text-muted-foreground mb-2">{t.sources.columnSettings.reorder}</p>
+                        <div className="mt-2 space-y-2 max-h-[400px] overflow-y-auto">
+                          {importColumnOrder.map((col, index) => (
+                            <div
+                              key={col}
+                              draggable
+                              onDragStart={() => {
+                                setImportDraggedColumnIndex(index)
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault()
+                                setImportDragOverColumnIndex(index)
+                              }}
+                              onDragLeave={() => {
+                                setImportDragOverColumnIndex(null)
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault()
+                                if (importDraggedColumnIndex !== null && importDraggedColumnIndex !== index) {
+                                  const newOrder = [...importColumnOrder]
+                                  const [removed] = newOrder.splice(importDraggedColumnIndex, 1)
+                                  newOrder.splice(index, 0, removed)
+                                  setImportColumnOrder(newOrder)
+                                }
+                                setImportDraggedColumnIndex(null)
+                                setImportDragOverColumnIndex(null)
+                              }}
+                              className={`flex items-center space-x-2 p-2 rounded-md transition-colors cursor-move ${
+                                importDragOverColumnIndex === index ? "bg-accent" : ""
+                              } ${importDraggedColumnIndex === index ? "opacity-50" : ""}`}
+                            >
+                              <div className="text-muted-foreground select-none">⋮⋮</div>
+                              <Checkbox
+                                id={`delete-${col}`}
+                                checked={importColumnVisibility[col]}
+                                onCheckedChange={(checked) => {
+                                  setImportColumnVisibility({ ...importColumnVisibility, [col]: checked as boolean })
+                                }}
+                              />
+                              <Label htmlFor={`delete-${col}`} className="text-sm font-normal cursor-pointer flex-1">
+                                {getColumnLabel(col)}
+                              </Label>
+                              <div className="flex flex-col gap-0.5">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 p-0"
+                                  onClick={() => {
+                                    if (index > 0) {
+                                      const newOrder = [...importColumnOrder]
+                                      newOrder[index] = importColumnOrder[index - 1]
+                                      newOrder[index - 1] = col
+                                      setImportColumnOrder(newOrder)
+                                    }
+                                  }}
+                                  disabled={index === 0}
+                                >
+                                  <ChevronUp className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 p-0"
+                                  onClick={() => {
+                                    if (index < importColumnOrder.length - 1) {
+                                      const newOrder = [...importColumnOrder]
+                                      newOrder[index] = importColumnOrder[index + 1]
+                                      newOrder[index + 1] = col
+                                      setImportColumnOrder(newOrder)
+                                    }
+                                  }}
+                                  disabled={index === importColumnOrder.length - 1}
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+            {sources.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No sources to delete
+              </div>
+            ) : (
+              <div className="flex-1 overflow-auto border rounded-lg">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[50px]">
+                        <Checkbox
+                          checked={selectedDeleteSourceIds.size === sources.length && sources.length > 0}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedDeleteSourceIds(new Set(sources.map(s => s.id)))
+                            } else {
+                              setSelectedDeleteSourceIds(new Set())
+                            }
+                          }}
+                        />
+                      </TableHead>
+                      {importColumnOrder.filter((col) => importColumnVisibility[col]).map((col) => (
+                        <TableHead key={col}>{getColumnLabel(col)}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sources.map((source) => {
+                      const isSelected = selectedDeleteSourceIds.has(source.id)
+                      const importVisibleColumns = importColumnOrder.filter((col) => importColumnVisibility[col])
+                      return (
+                        <TableRow key={source.id} className={isSelected ? "" : "opacity-50"}>
+                          <TableCell>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                const newSelected = new Set(selectedDeleteSourceIds)
+                                if (checked) {
+                                  newSelected.add(source.id)
+                                } else {
+                                  newSelected.delete(source.id)
+                                }
+                                setSelectedDeleteSourceIds(newSelected)
+                              }}
+                            />
+                          </TableCell>
+                          {importVisibleColumns.map((col) => {
+                            const cellValue = source[col as keyof Source] as string | null
+
+                            return (
+                              <TableCell key={col}>
+                                {col === "topics" ? (
+                                  source.topics.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {source.topics.map((topic) => (
+                                        <Badge
+                                          key={topic.id}
+                                          variant="outline"
+                                          style={{
+                                            backgroundColor: topic.color,
+                                            color: "white",
+                                            borderColor: topic.color,
+                                          }}
+                                        >
+                                          {topic.abbreviation || topic.name}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    "-"
+                                  )
+                                ) : col === "publicationDate" ? (
+                                  <div className="max-w-[150px] text-sm">{formatPublicationDate(cellValue)}</div>
+                                ) : col === "links" ? (
+                                  <div className="max-w-[300px] text-sm">{renderLinks(cellValue)}</div>
+                                ) : col === "authors" ? (
+                                  <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                                ) : col === "bibtex" || col === "description" || col === "notes" ? (
+                                  <div className="max-w-[400px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                                ) : (
+                                  <div className="truncate max-w-[200px]">{cellValue || "-"}</div>
+                                )}
+                              </TableCell>
+                            )
+                          })}
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteAllDialogOpen(false)
+                setSelectedDeleteSourceIds(new Set())
+              }}
+              disabled={deletingAll}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteAllConfirm}
+              disabled={deletingAll || selectedDeleteSourceIds.size === 0}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingAll ? (
+                <>
+                  <Spinner className="mr-2 h-4 w-4" />
+                  Deleting...
+                </>
+              ) : (
+                `Delete ${selectedDeleteSourceIds.size} Source${selectedDeleteSourceIds.size !== 1 ? 's' : ''}`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Import Dialog */}
       <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
         <DialogContent className="!max-w-[98vw] !w-[98vw] max-h-[95vh] overflow-hidden !flex !flex-col">
@@ -1986,22 +1388,48 @@ export default function SourcesPage() {
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 py-4">
             {!importFile ? (
-              <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8">
-                <Label htmlFor="import-file" className="cursor-pointer">
-                  <div className="flex flex-col items-center gap-2">
-                    <Upload className="h-8 w-8 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">
-                      {t.sources.import.selectFile}
-                    </span>
-                  </div>
-                </Label>
+              <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 gap-4">
                 <input
                   id="import-file"
                   type="file"
-                  accept=".csv,.json"
+                  accept={importType === "json" ? ".json" : ".csv"}
                   onChange={handleFileSelect}
                   className="hidden"
                 />
+                <div 
+                  className="flex flex-col items-center gap-2 cursor-pointer"
+                  onClick={() => {
+                    const fileInput = document.getElementById("import-file") as HTMLInputElement
+                    fileInput?.click()
+                  }}
+                >
+                  <Upload className="h-8 w-8 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">
+                    {t.sources.import.selectFile}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Select value={importType} onValueChange={(v) => setImportType(v as "csv" | "json" | "miro-csv")}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="csv">CSV</SelectItem>
+                      <SelectItem value="json">JSON</SelectItem>
+                      <SelectItem value="miro-csv">Custom Miro CSV</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    const fileInput = document.getElementById("import-file") as HTMLInputElement
+                    fileInput?.click()
+                  }}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Select File
+                </Button>
               </div>
             ) : (
               <>
@@ -2168,7 +1596,7 @@ export default function SourcesPage() {
                                 else if (col === "notes") cellValue = source.notes || null
                                 else if (col === "links") cellValue = source.links || null
                                 else if (col === "bibtex") cellValue = source.bibtex || null
-                                
+
                                 return (
                                   <TableCell key={col}>
                                     {col === "topics" ? (
@@ -2221,6 +1649,7 @@ export default function SourcesPage() {
               onClick={() => {
                 setImportDialogOpen(false)
                 setImportFile(null)
+                setImportType("csv")
                 setImportData([])
                 setSelectedImportIndices(new Set())
               }}
@@ -2240,6 +1669,532 @@ export default function SourcesPage() {
               ) : (
                 t.sources.import.importSelected
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BibTeX Export Dialog */}
+      <Dialog open={bibtexExportDialogOpen} onOpenChange={setBibtexExportDialogOpen}>
+        <DialogContent className="!max-w-[98vw] !w-[98vw] max-h-[95vh] overflow-hidden !flex !flex-col">
+          <DialogHeader>
+            <DialogTitle>Export BibTeX</DialogTitle>
+            <DialogDescription>
+              Select sources to export as BibTeX. Choose to copy to clipboard or download as a file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="text-sm text-muted-foreground">
+                {selectedBibtexExportSourceIds.size} source{selectedBibtexExportSourceIds.size !== 1 ? 's' : ''} selected
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Topic Filter</Label>
+                  <Select value={bibtexExportTopicFilter} onValueChange={(v) => { 
+                    setBibtexExportTopicFilter(v)
+                    // Reselect all sources with new filter
+                    const filtered = v === "all" 
+                      ? sources 
+                      : sources.filter(s => s.topics.some(t => t.id === v))
+                    setSelectedBibtexExportSourceIds(new Set(filtered.map(s => s.id)))
+                  }}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue placeholder="All Topics" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Topics</SelectItem>
+                      {topics.map((topic) => (
+                        <SelectItem key={topic.id} value={topic.id}>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full border border-border"
+                              style={{ backgroundColor: topic.color }}
+                            />
+                            <span>{topic.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Label className="text-xs text-muted-foreground mb-1 block w-full">Columns</Label>
+                  <div className="flex gap-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="bibtex-export-desc"
+                        checked={bibtexExportColumnVisibility.description}
+                        onCheckedChange={(checked) => {
+                          setBibtexExportColumnVisibility({ ...bibtexExportColumnVisibility, description: checked as boolean })
+                        }}
+                      />
+                      <Label htmlFor="bibtex-export-desc" className="text-sm cursor-pointer">Description</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="bibtex-export-notes"
+                        checked={bibtexExportColumnVisibility.notes}
+                        onCheckedChange={(checked) => {
+                          setBibtexExportColumnVisibility({ ...bibtexExportColumnVisibility, notes: checked as boolean })
+                        }}
+                      />
+                      <Label htmlFor="bibtex-export-notes" className="text-sm cursor-pointer">Notes</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="bibtex-export-topics"
+                        checked={bibtexExportColumnVisibility.topics}
+                        onCheckedChange={(checked) => {
+                          setBibtexExportColumnVisibility({ ...bibtexExportColumnVisibility, topics: checked as boolean })
+                        }}
+                      />
+                      <Label htmlFor="bibtex-export-topics" className="text-sm cursor-pointer">Topics</Label>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => {
+                      const filtered = bibtexExportTopicFilter === "all" 
+                        ? sources 
+                        : sources.filter(s => s.topics.some(t => t.id === bibtexExportTopicFilter))
+                      setSelectedBibtexExportSourceIds(new Set(filtered.map(s => s.id)))
+                    }}
+                  >
+                    Select All
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => {
+                      setSelectedBibtexExportSourceIds(new Set())
+                    }}
+                  >
+                    Deselect All
+                  </Button>
+                </div>
+              </div>
+            </div>
+            {sources.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No sources available
+              </div>
+            ) : (() => {
+              const filteredSources = bibtexExportTopicFilter === "all" 
+                ? sources 
+                : sources.filter(s => s.topics.some(t => t.id === bibtexExportTopicFilter))
+              
+              return (
+                <div className="flex-1 overflow-auto border rounded-lg">
+                  <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[50px]">
+                            <Checkbox
+                              checked={selectedBibtexExportSourceIds.size === filteredSources.length && filteredSources.length > 0}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedBibtexExportSourceIds(new Set(filteredSources.map(s => s.id)))
+                                } else {
+                                  setSelectedBibtexExportSourceIds(new Set())
+                                }
+                              }}
+                            />
+                          </TableHead>
+                          <TableHead>Abbreviation</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Authors</TableHead>
+                          <TableHead>Publication Date</TableHead>
+                          {bibtexExportColumnVisibility.description && <TableHead>Description</TableHead>}
+                          {bibtexExportColumnVisibility.notes && <TableHead>Notes</TableHead>}
+                          {bibtexExportColumnVisibility.topics && <TableHead>Topics</TableHead>}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredSources.map((source) => {
+                          const isSelected = selectedBibtexExportSourceIds.has(source.id)
+
+                          return (
+                            <TableRow key={source.id} className={isSelected ? "" : "opacity-50"}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={(checked) => {
+                                    const newSelected = new Set(selectedBibtexExportSourceIds)
+                                    if (checked) {
+                                      newSelected.add(source.id)
+                                    } else {
+                                      newSelected.delete(source.id)
+                                    }
+                                    setSelectedBibtexExportSourceIds(newSelected)
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <div className="whitespace-nowrap">{source.abbreviation || "-"}</div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="max-w-[300px] truncate">{source.title || "-"}</div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{source.authors || "-"}</div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="whitespace-nowrap text-sm">{formatPublicationDate(source.publicationDate)}</div>
+                              </TableCell>
+                              {bibtexExportColumnVisibility.description && (
+                                <TableCell>
+                                  <div className="max-w-[250px] text-sm whitespace-pre-wrap break-words">{source.description || "-"}</div>
+                                </TableCell>
+                              )}
+                              {bibtexExportColumnVisibility.notes && (
+                                <TableCell>
+                                  <div className="max-w-[250px] text-sm whitespace-pre-wrap break-words">{source.notes || "-"}</div>
+                                </TableCell>
+                              )}
+                              {bibtexExportColumnVisibility.topics && (
+                                <TableCell>
+                                  {source.topics.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {source.topics.map((topic) => (
+                                        <Badge
+                                          key={topic.id}
+                                          variant="outline"
+                                          style={{
+                                            backgroundColor: topic.color,
+                                            color: "white",
+                                            borderColor: topic.color,
+                                          }}
+                                        >
+                                          {topic.abbreviation || topic.name}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                </div>
+              )
+            })()}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setBibtexExportDialogOpen(false)
+                setSelectedBibtexExportSourceIds(new Set())
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleCopyBibtexToClipboard}
+              disabled={selectedBibtexExportSourceIds.size === 0}
+            >
+              <Copy className="mr-2 h-4 w-4" />
+              Copy to Clipboard
+            </Button>
+            <Button
+              onClick={handleDownloadBibtexFile}
+              disabled={selectedBibtexExportSourceIds.size === 0}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Download as File
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Topics Dialog */}
+      <Dialog open={manageTopicsDialogOpen} onOpenChange={setManageTopicsDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Manage Topics</DialogTitle>
+            <DialogDescription>Add, edit, delete, or merge topics</DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Merge Topics Section */}
+            <div className="space-y-4 border rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <Merge className="h-4 w-4" />
+                <h3 className="font-semibold">Merge Topics</h3>
+              </div>
+              <p className="text-sm text-muted-foreground">Select multiple topics to merge into one</p>
+              
+              <div className="grid gap-4">
+                <div>
+                  <Label>Topics to Merge (select 2 or more)</Label>
+                  <div className="mt-2 max-h-[150px] overflow-y-auto border rounded-md p-2 space-y-2">
+                    {topics.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No topics available</p>
+                    ) : (
+                      topics.map((topic) => (
+                        <div key={topic.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            checked={selectedTopicsToMerge.has(topic.id)}
+                            onCheckedChange={(checked) => {
+                              const newSelected = new Set(selectedTopicsToMerge)
+                              if (checked) {
+                                newSelected.add(topic.id)
+                              } else {
+                                newSelected.delete(topic.id)
+                              }
+                              setSelectedTopicsToMerge(newSelected)
+                            }}
+                          />
+                          <Badge
+                            style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                            variant="outline"
+                          >
+                            {topic.abbreviation || topic.name}
+                          </Badge>
+                          <span className="text-sm">{topic.name}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="merge-name">Merged Topic Name *</Label>
+                      <Input
+                        id="merge-name"
+                        value={mergeTopicData.name}
+                        onChange={(e) => setMergeTopicData({ ...mergeTopicData, name: e.target.value })}
+                        placeholder="Enter name"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="merge-abbreviation">Abbreviation</Label>
+                      <Input
+                        id="merge-abbreviation"
+                        value={mergeTopicData.abbreviation}
+                        onChange={(e) => setMergeTopicData({ ...mergeTopicData, abbreviation: e.target.value })}
+                        placeholder="Optional"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="merge-color">Color</Label>
+                    <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2 flex-1">
+                        {PREDEFINED_COLORS.map((color) => (
+                          <button
+                            key={color.value}
+                            type="button"
+                            onClick={() => setMergeTopicData({ ...mergeTopicData, color: color.value })}
+                            className={`w-8 h-8 rounded-md border-2 transition-all ${
+                              mergeTopicData.color === color.value
+                                ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
+                                : "border-border hover:border-foreground/50"
+                            }`}
+                            style={{ backgroundColor: color.value }}
+                            title={color.name}
+                          />
+                        ))}
+                      </div>
+                      <Input
+                        id="merge-color"
+                        type="color"
+                        value={mergeTopicData.color}
+                        onChange={(e) => setMergeTopicData({ ...mergeTopicData, color: e.target.value })}
+                        className="w-12 h-8"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={handleMergeTopics}
+                  disabled={selectedTopicsToMerge.size < 2 || !mergeTopicData.name.trim() || mergingTopics}
+                >
+                  {mergingTopics ? (
+                    <>
+                      <Spinner className="mr-2 h-4 w-4" />
+                      Merging...
+                    </>
+                  ) : (
+                    <>
+                      <Merge className="mr-2 h-4 w-4" />
+                      Merge {selectedTopicsToMerge.size} Topic{selectedTopicsToMerge.size !== 1 ? 's' : ''}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Topics List */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">All Topics</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingTopic(null)
+                    setEditingTopicData({ name: "", abbreviation: "", color: "#3b82f6" })
+                    setCreateTopicDialogOpen(true)
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Topic
+                </Button>
+              </div>
+
+              {topics.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No topics yet. Create one to get started.</p>
+              ) : (
+                <div className="space-y-2">
+                  {topics.map((topic) => (
+                    <div
+                      key={topic.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Badge
+                          style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                          variant="outline"
+                        >
+                          {topic.abbreviation || topic.name}
+                        </Badge>
+                        <div>
+                          <div className="font-medium">{topic.name}</div>
+                          {topic.abbreviation && topic.abbreviation !== topic.name && (
+                            <div className="text-xs text-muted-foreground">{topic.abbreviation}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingTopic(topic)
+                            setEditingTopicData({
+                              name: topic.name,
+                              abbreviation: topic.abbreviation || "",
+                              color: topic.color,
+                            })
+                          }}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete "${topic.name}"? This will remove it from all sources.`)) {
+                              handleDeleteTopic(topic.id)
+                            }
+                          }}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setManageTopicsDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Topic Dialog */}
+      <Dialog 
+        open={editingTopic !== null} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingTopic(null)
+            setEditingTopicData({ name: "", abbreviation: "", color: "#3b82f6" })
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Topic</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-topic-name">Name *</Label>
+              <Input
+                id="edit-topic-name"
+                value={editingTopicData.name}
+                onChange={(e) => setEditingTopicData({ ...editingTopicData, name: e.target.value })}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-topic-abbreviation">Abbreviation</Label>
+              <Input
+                id="edit-topic-abbreviation"
+                value={editingTopicData.abbreviation}
+                onChange={(e) => setEditingTopicData({ ...editingTopicData, abbreviation: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-topic-color">Color</Label>
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {PREDEFINED_COLORS.map((color) => (
+                    <button
+                      key={color.value}
+                      type="button"
+                      onClick={() => setEditingTopicData({ ...editingTopicData, color: color.value })}
+                      className={`w-10 h-10 rounded-md border-2 transition-all ${
+                        editingTopicData.color === color.value
+                          ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
+                          : "border-border hover:border-foreground/50"
+                      }`}
+                      style={{ backgroundColor: color.value }}
+                      title={color.name}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="edit-topic-color"
+                    type="color"
+                    value={editingTopicData.color}
+                    onChange={(e) => setEditingTopicData({ ...editingTopicData, color: e.target.value })}
+                    className="w-20 h-10"
+                  />
+                  <Input
+                    value={editingTopicData.color}
+                    onChange={(e) => setEditingTopicData({ ...editingTopicData, color: e.target.value })}
+                    placeholder="#3b82f6"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingTopic(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateTopic} disabled={!editingTopicData.name.trim()}>
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>
