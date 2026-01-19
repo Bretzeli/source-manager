@@ -20,6 +20,23 @@ export function SettingsPageClient({
 }: SettingsPageClientProps) {
   const { t } = useTranslations()
 
+  // Safety check to prevent errors during locale switching
+  if (!t.settings) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+          <p className="text-muted-foreground mt-1">
+            Project settings for {projectTitle}
+          </p>
+        </div>
+        <div className="flex items-center justify-center p-8">
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
