@@ -1,5 +1,7 @@
-import { getProjects } from "@/app/actions/projects"
+import { getProject, hasGithubConnection } from "@/app/actions/projects"
 import { notFound } from "next/navigation"
+import { GithubRepoSettings } from "@/components/github-repo-settings"
+import { SettingsPageClient } from "./settings-client"
 
 export default async function SettingsPage({
   params,
@@ -7,25 +9,21 @@ export default async function SettingsPage({
   params: Promise<{ projectId: string }>
 }) {
   const { projectId } = await params
-  const projects = await getProjects()
-  const project = projects.find((p) => p.id === projectId)
+  const project = await getProject(projectId)
 
   if (!project) {
     notFound()
   }
 
+  const hasConnection = await hasGithubConnection(projectId)
+
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground mt-1">
-          Project settings for {project.title}
-        </p>
-      </div>
-      <div className="flex items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground">Settings page coming soon...</p>
-      </div>
-    </div>
+    <SettingsPageClient 
+      projectId={projectId}
+      projectTitle={project.title}
+      currentRepoUrl={project.githubRepoUrl || undefined}
+      currentSelectedFiles={project.githubRepoFiles ? JSON.parse(project.githubRepoFiles) : undefined}
+      hasConnection={hasConnection}
+    />
   )
 }
-

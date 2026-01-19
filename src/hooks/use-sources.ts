@@ -6,12 +6,12 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { useParams } from "next/navigation"
 import { toast } from "sonner"
 import { useTranslations } from "@/lib/i18n"
-import { getSources, getTopics, createSource, updateSource, deleteSource, deleteAllSources, createTopic, updateTopic, deleteTopic, mergeTopics, batchImportSources } from "@/app/actions/sources"
+import { getSources, getTags, createSource, updateSource, deleteSource, deleteAllSources, createTag, updateTag, deleteTag, mergeTags, batchImportSources } from "@/app/actions/sources"
 import { getProject } from "@/app/actions/projects"
 import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
 import { loadPreferences, savePreferences } from "@/lib/sources-preferences"
 import { parseImportFile, exportToCSV, exportToJSON, formatPublicationDate, sanitizeFilename } from "@/lib/sources-utils"
-import type { Source, Topic, ColumnKey, ImportSourceData } from "@/types/sources"
+import type { Source, Tag, ColumnKey, ImportSourceData } from "@/types/sources"
 import { COLUMN_ORDER } from "@/types/sources"
 
 export function useSources() {
@@ -20,7 +20,7 @@ export function useSources() {
   const { t } = useTranslations()
 
   const [sources, setSources] = useState<Source[]>([])
-  const [topics, setTopics] = useState<Topic[]>([])
+  const [tags, setTags] = useState<Tag[]>([])
   const [projectName, setProjectName] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
@@ -36,7 +36,7 @@ export function useSources() {
     title: true,
     authors: true,
     publicationDate: true,
-    topics: true,
+    tags: true,
     description: true,
     notes: true,
     links: true,
@@ -50,7 +50,7 @@ export function useSources() {
     title: 200,
     authors: 180,
     publicationDate: 120,
-    topics: 120,
+    tags: 120,
     description: 250,
     notes: 250,
     links: 250,
@@ -58,7 +58,7 @@ export function useSources() {
   })
 
   const [searchQuery, setSearchQuery] = useState("")
-  const [topicFilter, setTopicFilter] = useState<string>("all")
+  const [tagFilter, setTagFilter] = useState<string>("all")
   const [yearFromFilter, setYearFromFilter] = useState<string>("all")
   const [yearToFilter, setYearToFilter] = useState<string>("all")
   const [authorFilter, setAuthorFilter] = useState<string>("all")
@@ -81,11 +81,11 @@ export function useSources() {
     notes: "",
     links: "",
     bibtex: "",
-    topicIds: [] as string[],
+    tagIds: [] as string[],
   })
   const [creating, setCreating] = useState(false)
-  const [createTopicDialogOpen, setCreateTopicDialogOpen] = useState(false)
-  const [newTopic, setNewTopic] = useState({
+  const [createTagDialogOpen, setCreateTagDialogOpen] = useState(false)
+  const [newTag, setNewTag] = useState({
     name: "",
     abbreviation: "",
     color: "#3b82f6",
@@ -105,7 +105,7 @@ export function useSources() {
     title: true,
     authors: true,
     publicationDate: true,
-    topics: true,
+    tags: true,
     description: true,
     notes: true,
     links: true,
@@ -117,23 +117,23 @@ export function useSources() {
 
   const [bibtexExportDialogOpen, setBibtexExportDialogOpen] = useState(false)
   const [selectedBibtexExportSourceIds, setSelectedBibtexExportSourceIds] = useState<Set<string>>(new Set())
-  const [bibtexExportTopicFilter, setBibtexExportTopicFilter] = useState<string>("all")
+  const [bibtexExportTagFilter, setBibtexExportTagFilter] = useState<string>("all")
   const [bibtexExportColumnVisibility, setBibtexExportColumnVisibility] = useState({
     description: true,
     notes: true,
-    topics: true,
+    tags: true,
   })
 
-  const [manageTopicsDialogOpen, setManageTopicsDialogOpen] = useState(false)
-  const [editingTopic, setEditingTopic] = useState<Topic | null>(null)
-  const [editingTopicData, setEditingTopicData] = useState({
+  const [manageTagsDialogOpen, setManageTagsDialogOpen] = useState(false)
+  const [editingTag, setEditingTag] = useState<Tag | null>(null)
+  const [editingTagData, setEditingTagData] = useState({
     name: "",
     abbreviation: "",
     color: "#3b82f6",
   })
-  const [mergingTopics, setMergingTopics] = useState(false)
-  const [selectedTopicsToMerge, setSelectedTopicsToMerge] = useState<Set<string>>(new Set())
-  const [mergeTopicData, setMergeTopicData] = useState({
+  const [mergingTags, setMergingTags] = useState(false)
+  const [selectedTagsToMerge, setSelectedTagsToMerge] = useState<Set<string>>(new Set())
+  const [mergeTagData, setMergeTagData] = useState({
     name: "",
     abbreviation: "",
     color: "#3b82f6",
@@ -142,13 +142,13 @@ export function useSources() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
-      const [sourcesData, topicsData, projectData] = await Promise.all([
+      const [sourcesData, tagsData, projectData] = await Promise.all([
         getSources(projectId),
-        getTopics(projectId),
+        getTags(projectId),
         getProject(projectId),
       ])
       setSources(sourcesData as Source[])
-      setTopics(topicsData as Topic[])
+      setTags(tagsData as Tag[])
       if (projectData) {
         setProjectName(projectData.title)
       }
@@ -172,8 +172,8 @@ export function useSources() {
       if (savedPrefs.columnWidths) {
         setColumnWidths({ ...columnWidths, ...savedPrefs.columnWidths })
       }
-      if (savedPrefs.topicFilter) {
-        setTopicFilter(savedPrefs.topicFilter)
+      if (savedPrefs.tagFilter) {
+        setTagFilter(savedPrefs.tagFilter)
       }
       if (savedPrefs.yearFromFilter) {
         setYearFromFilter(savedPrefs.yearFromFilter)
@@ -200,14 +200,14 @@ export function useSources() {
         columnVisibility,
         columnOrder,
         columnWidths,
-        topicFilter,
+        tagFilter,
         yearFromFilter,
         yearToFilter,
         authorFilter,
         pageSize,
       })
     }
-  }, [projectId, columnVisibility, columnOrder, columnWidths, topicFilter, yearFromFilter, yearToFilter, authorFilter, pageSize])
+  }, [projectId, columnVisibility, columnOrder, columnWidths, tagFilter, yearFromFilter, yearToFilter, authorFilter, pageSize])
 
   const filteredAndSortedSources = useMemo(() => {
     let filtered = [...sources]
@@ -223,13 +223,13 @@ export function useSources() {
           source.notes?.toLowerCase().includes(query) ||
           source.links?.toLowerCase().includes(query) ||
           source.bibtex?.toLowerCase().includes(query) ||
-          source.topics.some((t) => t.name.toLowerCase().includes(query))
+          source.tags.some((t) => t.name.toLowerCase().includes(query))
         )
       })
     }
 
-    if (topicFilter !== "all") {
-      filtered = filtered.filter((source) => source.topics.some((t) => t.id === topicFilter))
+    if (tagFilter !== "all") {
+      filtered = filtered.filter((source) => source.tags.some((t) => t.id === tagFilter))
     }
 
     if (yearFromFilter !== "all" || yearToFilter !== "all") {
@@ -307,7 +307,7 @@ export function useSources() {
     }
 
     return filtered
-  }, [sources, searchQuery, topicFilter, yearFromFilter, yearToFilter, authorFilter, sortColumn, sortDirection])
+  }, [sources, searchQuery, tagFilter, yearFromFilter, yearToFilter, authorFilter, sortColumn, sortDirection])
 
   const paginatedSources = useMemo(() => {
     if (pageSize === "all") return filteredAndSortedSources
@@ -346,7 +346,13 @@ export function useSources() {
 
   const handleCellDoubleClick = (sourceId: string, column: ColumnKey, currentValue: string | null) => {
     setEditingCell({ sourceId, column })
-    const value = currentValue || ""
+    let value = currentValue || ""
+    // For publicationDate, format to show only yyyy or yyyy-mm when day/month are defaults (01-01)
+    if (column === "publicationDate" && value) {
+      const formatted = formatPublicationDate(value)
+      // formatPublicationDate returns "-" for null, but we want empty string for editing
+      value = formatted === "-" ? "" : formatted
+    }
     setEditValue(value)
     setOriginalValue(value)
   }
@@ -373,7 +379,7 @@ export function useSources() {
         notes?: string | null
         links?: string | null
         bibtex?: string | null
-        topicIds?: string[]
+        tagIds?: string[]
       } = { [editingCell.column]: editValue || null }
 
       if (editingCell.column === "bibtex") {
@@ -561,7 +567,7 @@ export function useSources() {
         notes: sourceData.notes || null,
         links: sourceData.links || null,
         bibtex: sourceData.bibtex || null,
-        topicIds: sourceData.topicIds,
+        tagIds: sourceData.tagIds,
       })
 
       toast.success(t.sources.sourceCreated)
@@ -575,7 +581,7 @@ export function useSources() {
         notes: "",
         links: "",
         bibtex: "",
-        topicIds: [],
+        tagIds: [],
       })
       await loadData()
     } catch (error) {
@@ -585,82 +591,82 @@ export function useSources() {
     }
   }
 
-  const handleCreateTopic = async () => {
+  const handleCreateTag = async () => {
     try {
-      const topic = await createTopic(projectId, {
-        abbreviation: newTopic.abbreviation || null,
-        name: newTopic.name,
-        color: newTopic.color,
+      const tag = await createTag(projectId, {
+        abbreviation: newTag.abbreviation || null,
+        name: newTag.name,
+        color: newTag.color,
       })
-      setTopics([...topics, topic as Topic])
-      setCreateTopicDialogOpen(false)
-      setNewTopic({ name: "", abbreviation: "", color: "#3b82f6" })
+      setTags([...tags, tag as Tag])
+      setCreateTagDialogOpen(false)
+      setNewTag({ name: "", abbreviation: "", color: "#3b82f6" })
       setCustomColor(false)
-      toast.success("Topic created successfully")
+      toast.success("Tag created successfully")
       await loadData()
     } catch (error) {
       toast.error(t.errors.generic)
     }
   }
 
-  const handleUpdateTopic = async () => {
-    if (!editingTopic) return
+  const handleUpdateTag = async () => {
+    if (!editingTag) return
 
     try {
-      await updateTopic(projectId, editingTopic.id, {
-        abbreviation: editingTopicData.abbreviation || null,
-        name: editingTopicData.name,
-        color: editingTopicData.color,
+      await updateTag(projectId, editingTag.id, {
+        abbreviation: editingTagData.abbreviation || null,
+        name: editingTagData.name,
+        color: editingTagData.color,
       })
-      toast.success("Topic updated successfully")
-      setEditingTopic(null)
-      setEditingTopicData({ name: "", abbreviation: "", color: "#3b82f6" })
+      toast.success("Tag updated successfully")
+      setEditingTag(null)
+      setEditingTagData({ name: "", abbreviation: "", color: "#3b82f6" })
       await loadData()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t.errors.generic)
     }
   }
 
-  const handleDeleteTopic = async (topicId: string) => {
+  const handleDeleteTag = async (tagId: string) => {
     try {
-      await deleteTopic(projectId, topicId)
-      toast.success("Topic deleted successfully")
+      await deleteTag(projectId, tagId)
+      toast.success("Tag deleted successfully")
       // Remove from merge selection if selected
-      const newSelected = new Set(selectedTopicsToMerge)
-      newSelected.delete(topicId)
-      setSelectedTopicsToMerge(newSelected)
+      const newSelected = new Set(selectedTagsToMerge)
+      newSelected.delete(tagId)
+      setSelectedTagsToMerge(newSelected)
       await loadData()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t.errors.generic)
     }
   }
 
-  const handleMergeTopics = async () => {
-    if (selectedTopicsToMerge.size < 2) {
-      toast.error("Please select at least 2 topics to merge")
+  const handleMergeTags = async () => {
+    if (selectedTagsToMerge.size < 2) {
+      toast.error("Please select at least 2 tags to merge")
       return
     }
 
-    if (!mergeTopicData.name.trim()) {
-      toast.error("Please provide a name for the merged topic")
+    if (!mergeTagData.name.trim()) {
+      toast.error("Please provide a name for the merged tag")
       return
     }
 
     try {
-      setMergingTopics(true)
-      await mergeTopics(projectId, Array.from(selectedTopicsToMerge), {
-        name: mergeTopicData.name,
-        abbreviation: mergeTopicData.abbreviation || null,
-        color: mergeTopicData.color,
+      setMergingTags(true)
+      await mergeTags(projectId, Array.from(selectedTagsToMerge), {
+        name: mergeTagData.name,
+        abbreviation: mergeTagData.abbreviation || null,
+        color: mergeTagData.color,
       })
-      toast.success(`Successfully merged ${selectedTopicsToMerge.size} topics`)
-      setSelectedTopicsToMerge(new Set())
-      setMergeTopicData({ name: "", abbreviation: "", color: "#3b82f6" })
+      toast.success(`Successfully merged ${selectedTagsToMerge.size} tags`)
+      setSelectedTagsToMerge(new Set())
+      setMergeTagData({ name: "", abbreviation: "", color: "#3b82f6" })
       await loadData()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t.errors.generic)
     } finally {
-      setMergingTopics(false)
+      setMergingTags(false)
     }
   }
 
@@ -742,10 +748,10 @@ export function useSources() {
   }
 
   const handleOpenBibtexExport = () => {
-    // Preselect all sources (respecting topic filter)
-    const filteredSources = bibtexExportTopicFilter === "all" 
+    // Preselect all sources (respecting tag filter)
+    const filteredSources = bibtexExportTagFilter === "all" 
       ? sources 
-      : sources.filter(s => s.topics.some(t => t.id === bibtexExportTopicFilter))
+      : sources.filter(s => s.tags.some(t => t.id === bibtexExportTagFilter))
     setSelectedBibtexExportSourceIds(new Set(filteredSources.map(s => s.id)))
     setBibtexExportDialogOpen(true)
   }
@@ -753,9 +759,9 @@ export function useSources() {
   const getFilteredSourcesForBibtexExport = () => {
     let filtered = sources.filter(s => selectedBibtexExportSourceIds.has(s.id))
     
-    // Apply topic filter
-    if (bibtexExportTopicFilter !== "all") {
-      filtered = filtered.filter(s => s.topics.some(t => t.id === bibtexExportTopicFilter))
+    // Apply tag filter
+    if (bibtexExportTagFilter !== "all") {
+      filtered = filtered.filter(s => s.tags.some(t => t.id === bibtexExportTagFilter))
     }
     
     return filtered
@@ -835,22 +841,22 @@ export function useSources() {
     }
   }
 
-  const handleUpdateSourceTopics = async (sourceId: string, newTopicIds: string[]) => {
+  const handleUpdateSourceTags = async (sourceId: string, newTagIds: string[]) => {
     try {
-      await updateSource(projectId, sourceId, { topicIds: newTopicIds })
+      await updateSource(projectId, sourceId, { tagIds: newTagIds })
 
       setSources((prevSources) =>
         prevSources.map((s) => {
           if (s.id === sourceId) {
-            const newTopics = newTopicIds
-              .map((topicId) => {
-                const topicData = topics.find((t) => t.id === topicId)
-                return topicData
+            const newTags = newTagIds
+              .map((tagId) => {
+                const tagData = tags.find((t) => t.id === tagId)
+                return tagData
                   ? {
-                      id: topicData.id,
-                      abbreviation: topicData.abbreviation,
-                      name: topicData.name,
-                      color: topicData.color,
+                      id: tagData.id,
+                      abbreviation: tagData.abbreviation,
+                      name: tagData.name,
+                      color: tagData.color,
                     }
                   : null
               })
@@ -858,7 +864,7 @@ export function useSources() {
 
             return {
               ...s,
-              topics: newTopics,
+              tags: newTags,
             }
           }
           return s
@@ -875,7 +881,7 @@ export function useSources() {
   return {
     // Data
     sources,
-    topics,
+    tags,
     projectName,
     loading,
     filteredAndSortedSources,
@@ -909,8 +915,8 @@ export function useSources() {
     setColumnWidths,
     searchQuery,
     setSearchQuery,
-    topicFilter,
-    setTopicFilter,
+    tagFilter,
+    setTagFilter,
     yearFromFilter,
     setYearFromFilter,
     yearToFilter,
@@ -929,10 +935,10 @@ export function useSources() {
     newSource,
     setNewSource,
     creating,
-    createTopicDialogOpen,
-    setCreateTopicDialogOpen,
-    newTopic,
-    setNewTopic,
+    createTagDialogOpen,
+    setCreateTagDialogOpen,
+    newTag,
+    setNewTag,
     customColor,
     setCustomColor,
     importDialogOpen,
@@ -966,20 +972,20 @@ export function useSources() {
     handleDeleteAllConfirm,
     handleCopyBibtex,
     handleAddSource,
-    handleCreateTopic,
+    handleCreateTag,
     handleSort,
     handleFileSelect,
     handleExcludeExisting,
     handleImport,
     handleExportCSV,
     handleExportJSON,
-    handleUpdateSourceTopics,
+    handleUpdateSourceTags,
     bibtexExportDialogOpen,
     setBibtexExportDialogOpen,
     selectedBibtexExportSourceIds,
     setSelectedBibtexExportSourceIds,
-    bibtexExportTopicFilter,
-    setBibtexExportTopicFilter,
+    bibtexExportTagFilter,
+    setBibtexExportTagFilter,
     bibtexExportColumnVisibility,
     setBibtexExportColumnVisibility,
     handleOpenBibtexExport,
@@ -987,22 +993,22 @@ export function useSources() {
     handleDownloadBibtexFile,
     loadData,
     setSources,
-    setTopics,
+    setTags,
     formatPublicationDate,
-    manageTopicsDialogOpen,
-    setManageTopicsDialogOpen,
-    editingTopic,
-    setEditingTopic,
-    editingTopicData,
-    setEditingTopicData,
-    handleUpdateTopic,
-    handleDeleteTopic,
-    mergingTopics,
-    selectedTopicsToMerge,
-    setSelectedTopicsToMerge,
-    mergeTopicData,
-    setMergeTopicData,
-    handleMergeTopics,
+    manageTagsDialogOpen,
+    setManageTagsDialogOpen,
+    editingTag,
+    setEditingTag,
+    editingTagData,
+    setEditingTagData,
+    handleUpdateTag,
+    handleDeleteTag,
+    mergingTags,
+    selectedTagsToMerge,
+    setSelectedTagsToMerge,
+    mergeTagData,
+    setMergeTagData,
+    handleMergeTags,
   }
 }
 

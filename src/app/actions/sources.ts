@@ -2,7 +2,7 @@
 
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { sources, topics, sourceTopics, projects } from "@/lib/db/app-schema"
+import { sources, tags, sourceTags, projects } from "@/lib/db/app-schema"
 import { eq, and, desc, asc, or, like, sql, inArray } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
@@ -69,50 +69,50 @@ export async function getSources(projectId: string) {
     .where(eq(sources.projectId, projectId))
     .orderBy(asc(sources.abbreviation))
 
-  // Get topics for each source
-  const sourcesWithTopics = await Promise.all(
+  // Get tags for each source
+  const sourcesWithTags = await Promise.all(
     allSources.map(async (source) => {
-      const sourceTopicRelations = await db
+      const sourceTagRelations = await db
         .select({
-          topicId: sourceTopics.topicId,
+          tagId: sourceTags.tagId,
         })
-        .from(sourceTopics)
-        .where(eq(sourceTopics.sourceId, source.id))
+        .from(sourceTags)
+        .where(eq(sourceTags.sourceId, source.id))
 
-      const topicIds = sourceTopicRelations.map((st) => st.topicId)
+      const tagIds = sourceTagRelations.map((st) => st.tagId)
       
-      let sourceTopicsData: Array<{
+      let sourceTagsData: Array<{
         id: string
         abbreviation: string
         name: string
         color: string
       }> = []
 
-      if (topicIds.length > 0) {
-        const topicsData = await db
+      if (tagIds.length > 0) {
+        const tagsData = await db
           .select({
-            id: topics.id,
-            abbreviation: topics.abbreviation,
-            name: topics.name,
-            color: topics.color,
+            id: tags.id,
+            abbreviation: tags.abbreviation,
+            name: tags.name,
+            color: tags.color,
           })
-          .from(topics)
-          .where(inArray(topics.id, topicIds))
+          .from(tags)
+          .where(inArray(tags.id, tagIds))
 
-        sourceTopicsData = topicsData
+        sourceTagsData = tagsData
       }
 
       return {
         ...source,
-        topics: sourceTopicsData,
+        tags: sourceTagsData,
       }
     })
   )
 
-  return sourcesWithTopics
+  return sourcesWithTags
 }
 
-export async function getTopics(projectId: string) {
+export async function getTags(projectId: string) {
   const session = await auth.api.getSession({ headers: await headers() })
   
   if (!session?.user) {
@@ -130,13 +130,13 @@ export async function getTopics(projectId: string) {
     return []
   }
 
-  const allTopics = await db
+  const allTags = await db
     .select()
-    .from(topics)
-    .where(eq(topics.projectId, projectId))
-    .orderBy(asc(topics.name))
+    .from(tags)
+    .where(eq(tags.projectId, projectId))
+    .orderBy(asc(tags.name))
 
-  return allTopics
+  return allTags
 }
 
 export async function createSource(projectId: string, data: {
@@ -148,7 +148,7 @@ export async function createSource(projectId: string, data: {
   notes?: string | null
   links?: string | null
   bibtex?: string | null
-  topicIds?: string[]
+  tagIds?: string[]
 }) {
   const session = await auth.api.getSession({ headers: await headers() })
   
@@ -182,12 +182,12 @@ export async function createSource(projectId: string, data: {
     })
     .returning()
 
-  // Add topic relations if provided
-  if (data.topicIds && data.topicIds.length > 0) {
-    await db.insert(sourceTopics).values(
-      data.topicIds.map((topicId) => ({
+  // Add tag relations if provided
+  if (data.tagIds && data.tagIds.length > 0) {
+    await db.insert(sourceTags).values(
+      data.tagIds.map((tagId) => ({
         sourceId: newSource.id,
-        topicId,
+        tagId,
       }))
     )
   }
@@ -208,7 +208,7 @@ export async function updateSource(
     notes?: string | null
     links?: string | null
     bibtex?: string | null
-    topicIds?: string[]
+    tagIds?: string[]
   }
 ) {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -258,19 +258,19 @@ export async function updateSource(
       .where(eq(sources.id, sourceId))
   }
 
-  // Update topic relations if provided
-  if (data.topicIds !== undefined) {
+  // Update tag relations if provided
+  if (data.tagIds !== undefined) {
     // Delete existing relations
     await db
-      .delete(sourceTopics)
-      .where(eq(sourceTopics.sourceId, sourceId))
+      .delete(sourceTags)
+      .where(eq(sourceTags.sourceId, sourceId))
 
     // Insert new relations
-    if (data.topicIds.length > 0) {
-      await db.insert(sourceTopics).values(
-        data.topicIds.map((topicId) => ({
+    if (data.tagIds.length > 0) {
+      await db.insert(sourceTags).values(
+        data.tagIds.map((tagId) => ({
           sourceId,
-          topicId,
+          tagId,
         }))
       )
     }
@@ -333,7 +333,7 @@ export async function deleteAllSources(projectId: string) {
     throw new Error("Project not found or unauthorized")
   }
 
-  // Delete all sources for this project (cascade will handle sourceTopics)
+  // Delete all sources for this project (cascade will handle sourceTags)
   await db
     .delete(sources)
     .where(eq(sources.projectId, projectId))
@@ -341,7 +341,7 @@ export async function deleteAllSources(projectId: string) {
   revalidatePath(`/projects/${projectId}/sources`)
 }
 
-export async function createTopic(projectId: string, data: {
+export async function createTag(projectId: string, data: {
   abbreviation?: string | null
   name: string
   description?: string | null
@@ -365,8 +365,8 @@ export async function createTopic(projectId: string, data: {
     throw new Error("Project not found or unauthorized")
   }
 
-  const [newTopic] = await db
-    .insert(topics)
+  const [newTag] = await db
+    .insert(tags)
     .values({
       projectId,
       abbreviation: data.abbreviation?.trim() || null,
@@ -378,12 +378,12 @@ export async function createTopic(projectId: string, data: {
     .returning()
 
   revalidatePath(`/projects/${projectId}/sources`)
-  return newTopic
+  return newTag
 }
 
-export async function updateTopic(
+export async function updateTag(
   projectId: string,
-  topicId: string,
+  tagId: string,
   data: {
     abbreviation?: string | null
     name?: string
@@ -409,18 +409,18 @@ export async function updateTopic(
     throw new Error("Project not found or unauthorized")
   }
 
-  // Verify topic belongs to project
-  const [topic] = await db
+  // Verify tag belongs to project
+  const [tag] = await db
     .select()
-    .from(topics)
-    .where(and(eq(topics.id, topicId), eq(topics.projectId, projectId)))
+    .from(tags)
+    .where(and(eq(tags.id, tagId), eq(tags.projectId, projectId)))
     .limit(1)
 
-  if (!topic) {
-    throw new Error("Topic not found")
+  if (!tag) {
+    throw new Error("Tag not found")
   }
 
-  const updateData: Partial<typeof topics.$inferInsert> = {}
+  const updateData: Partial<typeof tags.$inferInsert> = {}
   
   if (data.abbreviation !== undefined) updateData.abbreviation = data.abbreviation?.trim() || null
   if (data.name !== undefined) updateData.name = data.name.trim()
@@ -429,14 +429,14 @@ export async function updateTopic(
   if (data.color !== undefined) updateData.color = data.color
 
   await db
-    .update(topics)
+    .update(tags)
     .set(updateData)
-    .where(eq(topics.id, topicId))
+    .where(eq(tags.id, tagId))
 
   revalidatePath(`/projects/${projectId}/sources`)
 }
 
-export async function deleteTopic(projectId: string, topicId: string) {
+export async function deleteTag(projectId: string, tagId: string) {
   const session = await auth.api.getSession({ headers: await headers() })
   
   if (!session?.user) {
@@ -454,29 +454,29 @@ export async function deleteTopic(projectId: string, topicId: string) {
     throw new Error("Project not found or unauthorized")
   }
 
-  // Verify topic belongs to project
-  const [topic] = await db
+  // Verify tag belongs to project
+  const [tag] = await db
     .select()
-    .from(topics)
-    .where(and(eq(topics.id, topicId), eq(topics.projectId, projectId)))
+    .from(tags)
+    .where(and(eq(tags.id, tagId), eq(tags.projectId, projectId)))
     .limit(1)
 
-  if (!topic) {
-    throw new Error("Topic not found")
+  if (!tag) {
+    throw new Error("Tag not found")
   }
 
-  // Delete topic (cascade will handle sourceTopics relations)
+  // Delete tag (cascade will handle sourceTags relations)
   await db
-    .delete(topics)
-    .where(eq(topics.id, topicId))
+    .delete(tags)
+    .where(eq(tags.id, tagId))
 
   revalidatePath(`/projects/${projectId}/sources`)
 }
 
-export async function mergeTopics(
+export async function mergeTags(
   projectId: string,
-  sourceTopicIds: string[],
-  targetTopicData: {
+  sourceTagIds: string[],
+  targetTagData: {
     name: string
     abbreviation?: string | null
     color?: string
@@ -499,76 +499,76 @@ export async function mergeTopics(
     throw new Error("Project not found or unauthorized")
   }
 
-  if (sourceTopicIds.length < 2) {
-    throw new Error("At least 2 topics must be selected for merging")
+  if (sourceTagIds.length < 2) {
+    throw new Error("At least 2 tags must be selected for merging")
   }
 
-  // Verify all topics belong to project
-  const allTopics = await db
+  // Verify all tags belong to project
+  const allTags = await db
     .select()
-    .from(topics)
+    .from(tags)
     .where(and(
-      eq(topics.projectId, projectId),
-      inArray(topics.id, sourceTopicIds)
+      eq(tags.projectId, projectId),
+      inArray(tags.id, sourceTagIds)
     ))
 
-  if (allTopics.length !== sourceTopicIds.length) {
-    throw new Error("One or more topics not found")
+  if (allTags.length !== sourceTagIds.length) {
+    throw new Error("One or more tags not found")
   }
 
-  // Create the merged topic
-  const [mergedTopic] = await db
-    .insert(topics)
+  // Create the merged tag
+  const [mergedTag] = await db
+    .insert(tags)
     .values({
       projectId,
-      name: targetTopicData.name.trim(),
-      abbreviation: targetTopicData.abbreviation?.trim() || null,
-      color: targetTopicData.color || "#3b82f6",
+      name: targetTagData.name.trim(),
+      abbreviation: targetTagData.abbreviation?.trim() || null,
+      color: targetTagData.color || "#3b82f6",
     })
     .returning()
 
-  // Get all source-topic relations for the topics being merged
-  const sourceTopicRelations = await db
+  // Get all source-tag relations for the tags being merged
+  const sourceTagRelations = await db
     .select()
-    .from(sourceTopics)
-    .where(inArray(sourceTopics.topicId, sourceTopicIds))
+    .from(sourceTags)
+    .where(inArray(sourceTags.tagId, sourceTagIds))
 
   // Group by sourceId and merge to avoid duplicates
-  const sourceIdToTopicIds = new Map<string, Set<string>>()
-  sourceTopicRelations.forEach((rel) => {
-    if (!sourceIdToTopicIds.has(rel.sourceId)) {
-      sourceIdToTopicIds.set(rel.sourceId, new Set())
+  const sourceIdToTagIds = new Map<string, Set<string>>()
+  sourceTagRelations.forEach((rel) => {
+    if (!sourceIdToTagIds.has(rel.sourceId)) {
+      sourceIdToTagIds.set(rel.sourceId, new Set())
     }
-    sourceIdToTopicIds.get(rel.sourceId)!.add(rel.topicId)
+    sourceIdToTagIds.get(rel.sourceId)!.add(rel.tagId)
   })
 
-  // Update all source-topic relations to point to the merged topic
-  // First, remove existing relations for merged topics
+  // Update all source-tag relations to point to the merged tag
+  // First, remove existing relations for merged tags
   await db
-    .delete(sourceTopics)
-    .where(inArray(sourceTopics.topicId, sourceTopicIds))
+    .delete(sourceTags)
+    .where(inArray(sourceTags.tagId, sourceTagIds))
 
-  // Then, add new relations to merged topic (avoiding duplicates)
-  const newRelations = Array.from(sourceIdToTopicIds.keys()).map((sourceId) => ({
+  // Then, add new relations to merged tag (avoiding duplicates)
+  const newRelations = Array.from(sourceIdToTagIds.keys()).map((sourceId) => ({
     sourceId,
-    topicId: mergedTopic.id,
+    tagId: mergedTag.id,
   }))
 
   if (newRelations.length > 0) {
     // Remove duplicates by converting to Set and back
     const uniqueRelations = Array.from(
-      new Map(newRelations.map(r => [`${r.sourceId}-${r.topicId}`, r])).values()
+      new Map(newRelations.map(r => [`${r.sourceId}-${r.tagId}`, r])).values()
     )
-    await db.insert(sourceTopics).values(uniqueRelations)
+    await db.insert(sourceTags).values(uniqueRelations)
   }
 
-  // Delete the source topics
+  // Delete the source tags
   await db
-    .delete(topics)
-    .where(inArray(topics.id, sourceTopicIds))
+    .delete(tags)
+    .where(inArray(tags.id, sourceTagIds))
 
   revalidatePath(`/projects/${projectId}/sources`)
-  return mergedTopic
+  return mergedTag
 }
 
 export async function batchImportSources(
@@ -582,9 +582,9 @@ export async function batchImportSources(
     notes?: string | null
     links?: string | null
     bibtex?: string | null
-    topicNames?: string[]
-    topicColors?: Record<string, string>
-    topicAbbreviations?: Record<string, string>
+    tagNames?: string[]
+    tagColors?: Record<string, string>
+    tagAbbreviations?: Record<string, string>
   }>
 ) {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -604,15 +604,15 @@ export async function batchImportSources(
     throw new Error("Project not found or unauthorized")
   }
 
-  // Get existing topics for this project
-  const existingTopics = await db
+  // Get existing tags for this project
+  const existingTags = await db
     .select()
-    .from(topics)
-    .where(eq(topics.projectId, projectId))
+    .from(tags)
+    .where(eq(tags.projectId, projectId))
 
-  const topicNameToId: Record<string, string> = {}
-  existingTopics.forEach((topic) => {
-    topicNameToId[topic.name.toLowerCase()] = topic.id
+  const tagNameToId: Record<string, string> = {}
+  existingTags.forEach((tag) => {
+    tagNameToId[tag.name.toLowerCase()] = tag.id
   })
 
   // Get existing sources with bibtex to check for duplicates
@@ -668,41 +668,41 @@ export async function batchImportSources(
 
     createdSources.push(newSource.id)
 
-    // Handle topics
-    if (sourceData.topicNames && sourceData.topicNames.length > 0) {
-      const topicIds: string[] = []
+    // Handle tags
+    if (sourceData.tagNames && sourceData.tagNames.length > 0) {
+      const tagIds: string[] = []
 
-      for (const topicName of sourceData.topicNames) {
-        const topicNameLower = topicName.toLowerCase()
-        let topicId = topicNameToId[topicNameLower]
+      for (const tagName of sourceData.tagNames) {
+        const tagNameLower = tagName.toLowerCase()
+        let tagId = tagNameToId[tagNameLower]
 
-        // Create topic if it doesn't exist (default color is blue)
-        if (!topicId) {
-          const color = sourceData.topicColors?.[topicName] || "#3b82f6" // Default blue
-          const abbreviation = sourceData.topicAbbreviations?.[topicName] || null
-          const [newTopic] = await db
-            .insert(topics)
+        // Create tag if it doesn't exist (default color is blue)
+        if (!tagId) {
+          const color = sourceData.tagColors?.[tagName] || "#3b82f6" // Default blue
+          const abbreviation = sourceData.tagAbbreviations?.[tagName] || null
+          const [newTag] = await db
+            .insert(tags)
             .values({
               projectId,
-              name: topicName.trim(),
+              name: tagName.trim(),
               abbreviation: abbreviation?.trim() || null,
               color,
             })
             .returning()
 
-          topicId = newTopic.id
-          topicNameToId[topicNameLower] = topicId
+          tagId = newTag.id
+          tagNameToId[tagNameLower] = tagId
         }
 
-        topicIds.push(topicId)
+        tagIds.push(tagId)
       }
 
-      // Create source-topic relations
-      if (topicIds.length > 0) {
-        await db.insert(sourceTopics).values(
-          topicIds.map((topicId) => ({
+      // Create source-tag relations
+      if (tagIds.length > 0) {
+        await db.insert(sourceTags).values(
+          tagIds.map((tagId) => ({
             sourceId: newSource.id,
-            topicId,
+            tagId,
           }))
         )
       }

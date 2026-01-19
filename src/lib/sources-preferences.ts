@@ -33,7 +33,7 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
   const columnVisibility = getCookie(`${prefix}columnVisibility`)
   const columnOrder = getCookie(`${prefix}columnOrder`)
   const columnWidths = getCookie(`${prefix}columnWidths`)
-  const topicFilter = getCookie(`${prefix}topicFilter`)
+  const tagFilter = getCookie(`${prefix}tagFilter`)
   const yearFromFilter = getCookie(`${prefix}yearFromFilter`)
   const yearToFilter = getCookie(`${prefix}yearToFilter`)
   const authorFilter = getCookie(`${prefix}authorFilter`)
@@ -43,7 +43,7 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
     columnVisibility: columnVisibility ? JSON.parse(columnVisibility) : null,
     columnOrder: columnOrder ? JSON.parse(columnOrder) : null,
     columnWidths: columnWidths ? JSON.parse(columnWidths) : null,
-    topicFilter: topicFilter || null,
+    tagFilter: tagFilter || null,
     yearFromFilter: yearFromFilter || null,
     yearToFilter: yearToFilter || null,
     authorFilter: authorFilter || null,
@@ -60,7 +60,7 @@ export function savePreferences(
     columnVisibility?: Record<ColumnKey, boolean>
     columnOrder?: ColumnKey[]
     columnWidths?: Record<ColumnKey, number>
-    topicFilter?: string
+    tagFilter?: string
     yearFromFilter?: string
     yearToFilter?: string
     authorFilter?: string
@@ -71,7 +71,7 @@ export function savePreferences(
   if (prefs.columnVisibility) setCookie(`${prefix}columnVisibility`, JSON.stringify(prefs.columnVisibility))
   if (prefs.columnOrder) setCookie(`${prefix}columnOrder`, JSON.stringify(prefs.columnOrder))
   if (prefs.columnWidths) setCookie(`${prefix}columnWidths`, JSON.stringify(prefs.columnWidths))
-  if (prefs.topicFilter !== undefined) setCookie(`${prefix}topicFilter`, prefs.topicFilter)
+  if (prefs.tagFilter !== undefined) setCookie(`${prefix}tagFilter`, prefs.tagFilter)
   if (prefs.yearFromFilter !== undefined) setCookie(`${prefix}yearFromFilter`, prefs.yearFromFilter)
   if (prefs.yearToFilter !== undefined) setCookie(`${prefix}yearToFilter`, prefs.yearToFilter)
   if (prefs.authorFilter !== undefined) setCookie(`${prefix}authorFilter`, prefs.authorFilter)

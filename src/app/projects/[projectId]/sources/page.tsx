@@ -70,7 +70,7 @@ export default function SourcesPage() {
   const { t } = useTranslations()
   const {
     sources,
-    topics,
+    tags,
     loading,
     filteredAndSortedSources,
     paginatedSources,
@@ -100,8 +100,8 @@ export default function SourcesPage() {
     setColumnWidths,
     searchQuery,
     setSearchQuery,
-    topicFilter,
-    setTopicFilter,
+    tagFilter,
+    setTagFilter,
     yearFromFilter,
     setYearFromFilter,
     yearToFilter,
@@ -119,10 +119,10 @@ export default function SourcesPage() {
     newSource,
     setNewSource,
     creating,
-    createTopicDialogOpen,
-    setCreateTopicDialogOpen,
-    newTopic,
-    setNewTopic,
+    createTagDialogOpen,
+    setCreateTagDialogOpen,
+    newTag,
+    setNewTag,
     customColor,
     setCustomColor,
     importDialogOpen,
@@ -154,55 +154,92 @@ export default function SourcesPage() {
     handleDeleteAllConfirm,
     handleCopyBibtex,
     handleAddSource,
-    handleCreateTopic,
+    handleCreateTag,
     handleSort,
     handleFileSelect,
     handleExcludeExisting,
     handleImport,
     handleExportCSV,
     handleExportJSON,
-    handleUpdateSourceTopics,
+    handleUpdateSourceTags,
     bibtexExportDialogOpen,
     setBibtexExportDialogOpen,
     selectedBibtexExportSourceIds,
     setSelectedBibtexExportSourceIds,
-    bibtexExportTopicFilter,
-    setBibtexExportTopicFilter,
+    bibtexExportTagFilter,
+    setBibtexExportTagFilter,
     bibtexExportColumnVisibility,
     setBibtexExportColumnVisibility,
     handleOpenBibtexExport,
     handleCopyBibtexToClipboard,
     handleDownloadBibtexFile,
-    manageTopicsDialogOpen,
-    setManageTopicsDialogOpen,
-    editingTopic,
-    setEditingTopic,
-    editingTopicData,
-    setEditingTopicData,
-    handleUpdateTopic,
-    handleDeleteTopic,
-    mergingTopics,
-    selectedTopicsToMerge,
-    setSelectedTopicsToMerge,
-    mergeTopicData,
-    setMergeTopicData,
-    handleMergeTopics,
+    manageTagsDialogOpen,
+    setManageTagsDialogOpen,
+    editingTag,
+    setEditingTag,
+    editingTagData,
+    setEditingTagData,
+    handleUpdateTag,
+    handleDeleteTag,
+    mergingTags,
+    selectedTagsToMerge,
+    setSelectedTagsToMerge,
+    mergeTagData,
+    setMergeTagData,
+    handleMergeTags,
   } = useSources()
 
   const [isResizing, setIsResizing] = React.useState(false)
   const [hasResized, setHasResized] = React.useState(false)
-  const [deleteTopicDialogOpen, setDeleteTopicDialogOpen] = React.useState(false)
-  const [topicToDelete, setTopicToDelete] = React.useState<{ id: string; name: string } | null>(null)
+  const [keepTableWidth, setKeepTableWidth] = React.useState(true)
+  const [showColumnSeparators, setShowColumnSeparators] = React.useState(false)
+  const [deleteTagDialogOpen, setDeleteTagDialogOpen] = React.useState(false)
+  const [tagToDelete, setTagToDelete] = React.useState<{ id: string; name: string } | null>(null)
 
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
   }
 
   const handleColumnResize = (column: ColumnKey, newWidth: number) => {
-    setColumnWidths((prev) => ({
-      ...prev,
-      [column]: Math.max(50, newWidth), // Minimum width of 50px
-    }))
+    setColumnWidths((prev) => {
+      const currentWidth = prev[column]
+      const widthDiff = newWidth - currentWidth
+      const minWidth = 50 // Minimum width of 50px
+      const actualNewWidth = Math.max(minWidth, newWidth)
+
+      // If keepTableWidth is enabled, adjust the next column
+      if (keepTableWidth) {
+        const columnIndex = visibleColumns.indexOf(column)
+        if (columnIndex >= 0 && columnIndex < visibleColumns.length - 1) {
+          const nextColumn = visibleColumns[columnIndex + 1]
+          const nextColumnWidth = prev[nextColumn]
+          const newNextColumnWidth = Math.max(minWidth, nextColumnWidth - widthDiff)
+
+          // Only update if both columns can maintain minimum width
+          if (actualNewWidth >= minWidth && newNextColumnWidth >= minWidth) {
+            return {
+              ...prev,
+              [column]: actualNewWidth,
+              [nextColumn]: newNextColumnWidth,
+            }
+          }
+          // If adjustment would violate minimum width, keep original widths
+          return prev
+        }
+        // Last column - can't adjust next column, so just return updated width
+        // (This shouldn't happen as last column doesn't have a resize handle, but handle it anyway)
+        return {
+          ...prev,
+          [column]: actualNewWidth,
+        }
+      }
+
+      // Default behavior: just change this column's width
+      return {
+        ...prev,
+        [column]: actualNewWidth,
+      }
+    })
   }
 
   const handleResizeStart = (e: React.MouseEvent, column: ColumnKey) => {
@@ -353,21 +390,21 @@ export default function SourcesPage() {
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground mb-1 block">Topic</Label>
-            <Select value={topicFilter} onValueChange={(v) => { setTopicFilter(v); setCurrentPage(1) }}>
+            <Label className="text-xs text-muted-foreground mb-1 block">Tag</Label>
+            <Select value={tagFilter} onValueChange={(v) => { setTagFilter(v); setCurrentPage(1) }}>
               <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder={t.sources.filters.topic} />
+                <SelectValue placeholder={t.sources.filters.tag} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{t.sources.filters.all}</SelectItem>
-                {topics.map((topic) => (
-                  <SelectItem key={topic.id} value={topic.id}>
+                {tags.map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id}>
                     <div className="flex items-center gap-2">
                       <div
                         className="w-3 h-3 rounded-full border border-border"
-                        style={{ backgroundColor: topic.color }}
+                        style={{ backgroundColor: tag.color }}
                       />
-                      <span>{topic.name}</span>
+                      <span>{tag.name}</span>
                     </div>
                   </SelectItem>
                 ))}
@@ -529,9 +566,9 @@ export default function SourcesPage() {
           <Plus className="mr-2 h-4 w-4" />
           {t.sources.addSource}
         </Button>
-        <Button variant="outline" onClick={() => setManageTopicsDialogOpen(true)}>
+        <Button variant="outline" onClick={() => setManageTagsDialogOpen(true)}>
           <Tag className="mr-2 h-4 w-4" />
-          Manage Topics
+          Manage Tags
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -594,6 +631,28 @@ export default function SourcesPage() {
         </div>
       ) : (
         <>
+          <div className="flex items-center gap-4 mb-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="keep-table-width"
+                checked={keepTableWidth}
+                onCheckedChange={(checked) => setKeepTableWidth(checked === true)}
+              />
+              <Label htmlFor="keep-table-width" className="cursor-pointer text-sm font-normal">
+                {t.sources.columnSettings.keepTableWidth}
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-column-separators"
+                checked={showColumnSeparators}
+                onCheckedChange={(checked) => setShowColumnSeparators(checked === true)}
+              />
+              <Label htmlFor="show-column-separators" className="cursor-pointer text-sm font-normal">
+                {t.sources.columnSettings.showColumnSeparators}
+              </Label>
+            </div>
+          </div>
           <div className="border rounded-lg overflow-x-auto">
             <Table className="table-fixed w-full">
               <TableHeader>
@@ -601,7 +660,7 @@ export default function SourcesPage() {
                   {visibleColumns.map((col, index) => (
                     <TableHead
                       key={col}
-                      className="cursor-pointer select-none relative group"
+                      className={`cursor-pointer select-none relative group ${showColumnSeparators && index < visibleColumns.length - 1 ? "border-r" : ""}`}
                       onClick={(e) => handleHeaderClick(col, e)}
                       style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                     >
@@ -637,15 +696,15 @@ export default function SourcesPage() {
                 ) : (
                   paginatedSources.map((source) => (
                     <TableRow key={source.id}>
-                      {visibleColumns.map((col) => {
+                      {visibleColumns.map((col, colIndex) => {
                         const isEditing = editingCell?.sourceId === source.id && editingCell?.column === col
                         const cellValue = source[col as keyof Source] as string | null
 
                         return (
                           <TableCell
                             key={col}
-                            onDoubleClick={() => handleCellDoubleClick(source.id, col, cellValue)}
-                            className={`${col !== "topics" && col !== "bibtex" ? "cursor-pointer" : ""} break-words whitespace-normal`}
+                            onDoubleClick={col !== "tags" ? () => handleCellDoubleClick(source.id, col, cellValue) : undefined}
+                            className={`${col !== "tags" && col !== "bibtex" ? "cursor-pointer" : ""} break-words whitespace-normal ${showColumnSeparators && colIndex < visibleColumns.length - 1 ? "border-r" : ""}`}
                             style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                           >
                             {isEditing ? (
@@ -706,27 +765,27 @@ export default function SourcesPage() {
                                   <X className="h-4 w-4" />
                                 </Button>
                               </div>
-                            ) : col === "topics" ? (
+                            ) : col === "tags" ? (
                               <Popover>
                                 <PopoverTrigger asChild>
                                   <Button variant="ghost" size="sm" className="h-auto p-1">
                                     <div className="flex flex-col gap-1">
-                                      {source.topics.length === 0 ? (
-                                        <span className="text-muted-foreground text-sm">No topics</span>
+                                      {source.tags.length === 0 ? (
+                                        <span className="text-muted-foreground text-sm">No tags</span>
                                       ) : (
-                                        source.topics.map((topic) => (
-                                          <Tooltip key={topic.id}>
+                                        source.tags.map((tag) => (
+                                          <Tooltip key={tag.id}>
                                             <TooltipTrigger asChild>
                                               <Badge
-                                                style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                                                style={{ backgroundColor: tag.color, color: "white", borderColor: tag.color }}
                                                 variant="outline"
                                                 className="w-fit"
                                               >
-                                                {topic.abbreviation || topic.name}
+                                                {tag.abbreviation || tag.name}
                                               </Badge>
                                             </TooltipTrigger>
                                             <TooltipContent>
-                                              {topic.abbreviation ? topic.name : topic.name}
+                                              {tag.abbreviation ? tag.name : tag.name}
                                             </TooltipContent>
                                           </Tooltip>
                                         ))
@@ -736,27 +795,27 @@ export default function SourcesPage() {
                                 </PopoverTrigger>
                                 <PopoverContent className="w-80">
                                   <div className="space-y-4">
-                                    <Label>{t.sources.addDialog.topics}</Label>
+                                    <Label>{t.sources.addDialog.tags}</Label>
                                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                                      {topics.map((topic) => (
-                                        <div key={topic.id} className="flex items-center space-x-2">
+                                      {tags.map((tag) => (
+                                        <div key={tag.id} className="flex items-center space-x-2">
                                           <Checkbox
-                                            checked={source.topics.some((t) => t.id === topic.id)}
+                                            checked={source.tags.some((t) => t.id === tag.id)}
                                             onCheckedChange={async (checked) => {
-                                              const currentTopicIds = source.topics.map((t) => t.id)
-                                              const newTopicIds = checked
-                                                ? [...currentTopicIds, topic.id]
-                                                : currentTopicIds.filter((id) => id !== topic.id)
+                                              const currentTagIds = source.tags.map((t) => t.id)
+                                              const newTagIds = checked
+                                                ? [...currentTagIds, tag.id]
+                                                : currentTagIds.filter((id) => id !== tag.id)
 
-                                              handleUpdateSourceTopics(source.id, newTopicIds)
+                                              handleUpdateSourceTags(source.id, newTagIds)
                                             }}
                                           />
                                           <Label className="flex items-center gap-2 cursor-pointer">
                                             <Badge
-                                              style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                                              style={{ backgroundColor: tag.color, color: "white", borderColor: tag.color }}
                                               variant="outline"
                                             >
-                                              {topic.name}
+                                              {tag.name}
                                             </Badge>
                                           </Label>
                                         </div>
@@ -765,10 +824,10 @@ export default function SourcesPage() {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => setCreateTopicDialogOpen(true)}
+                                      onClick={() => setCreateTagDialogOpen(true)}
                                     >
                                       <Plus className="mr-2 h-4 w-4" />
-                                      {t.sources.addDialog.createTopic}
+                                      {t.sources.addDialog.createTag}
                                     </Button>
                                   </div>
                                 </PopoverContent>
@@ -963,37 +1022,37 @@ export default function SourcesPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="topics">{t.sources.addDialog.topics}</Label>
+              <Label htmlFor="tags">{t.sources.addDialog.tags}</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="justify-start">
-                    {newSource.topicIds.length === 0
-                      ? "Select topics"
-                      : `${newSource.topicIds.length} topic(s) selected`}
+                    {newSource.tagIds.length === 0
+                      ? "Select tags"
+                      : `${newSource.tagIds.length} tag(s) selected`}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-80">
                   <div className="space-y-4">
                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {topics.map((topic) => (
-                        <div key={topic.id} className="flex items-center space-x-2">
+                      {tags.map((tag) => (
+                        <div key={tag.id} className="flex items-center space-x-2">
                           <Checkbox
-                            checked={newSource.topicIds.includes(topic.id)}
+                            checked={newSource.tagIds.includes(tag.id)}
                             onCheckedChange={(checked) => {
                               setNewSource({
                                 ...newSource,
-                                topicIds: checked
-                                  ? [...newSource.topicIds, topic.id]
-                                  : newSource.topicIds.filter((id) => id !== topic.id),
+                                tagIds: checked
+                                  ? [...newSource.tagIds, tag.id]
+                                  : newSource.tagIds.filter((id) => id !== tag.id),
                               })
                             }}
                           />
                           <Label className="flex items-center gap-2 cursor-pointer">
                             <Badge
-                              style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                              style={{ backgroundColor: tag.color, color: "white", borderColor: tag.color }}
                               variant="outline"
                             >
-                              {topic.name}
+                              {tag.name}
                             </Badge>
                           </Label>
                         </div>
@@ -1002,10 +1061,10 @@ export default function SourcesPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCreateTopicDialogOpen(true)}
+                      onClick={() => setCreateTagDialogOpen(true)}
                     >
                       <Plus className="mr-2 h-4 w-4" />
-                      {t.sources.addDialog.createTopic}
+                      {t.sources.addDialog.createTag}
                     </Button>
                   </div>
                 </PopoverContent>
@@ -1053,7 +1112,7 @@ export default function SourcesPage() {
                   notes: "",
                   links: "",
                   bibtex: "",
-                  topicIds: [],
+                  tagIds: [],
                 })
               }}
               disabled={creating}
@@ -1074,32 +1133,32 @@ export default function SourcesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Create Topic Dialog */}
-      <Dialog open={createTopicDialogOpen} onOpenChange={setCreateTopicDialogOpen}>
+      {/* Create Tag Dialog */}
+      <Dialog open={createTagDialogOpen} onOpenChange={setCreateTagDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t.sources.addDialog.createTopic}</DialogTitle>
+            <DialogTitle>{t.sources.addDialog.createTag}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="topicName">{t.sources.addDialog.topicName} *</Label>
+              <Label htmlFor="tagName">{t.sources.addDialog.tagName} *</Label>
               <Input
-                id="topicName"
-                value={newTopic.name}
-                onChange={(e) => setNewTopic({ ...newTopic, name: e.target.value })}
+                id="tagName"
+                value={newTag.name}
+                onChange={(e) => setNewTag({ ...newTag, name: e.target.value })}
                 required
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="topicAbbreviation">{t.sources.addDialog.topicAbbreviation}</Label>
+              <Label htmlFor="tagAbbreviation">{t.sources.addDialog.tagAbbreviation}</Label>
               <Input
-                id="topicAbbreviation"
-                value={newTopic.abbreviation}
-                onChange={(e) => setNewTopic({ ...newTopic, abbreviation: e.target.value })}
+                id="tagAbbreviation"
+                value={newTag.abbreviation}
+                onChange={(e) => setNewTag({ ...newTag, abbreviation: e.target.value })}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="topicColor">{t.sources.addDialog.topicColor}</Label>
+              <Label htmlFor="tagColor">{t.sources.addDialog.tagColor}</Label>
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
                   {PREDEFINED_COLORS.map((color) => (
@@ -1107,11 +1166,11 @@ export default function SourcesPage() {
                       key={color.value}
                       type="button"
                       onClick={() => {
-                        setNewTopic({ ...newTopic, color: color.value })
+                        setNewTag({ ...newTag, color: color.value })
                         setCustomColor(false)
                       }}
                       className={`w-10 h-10 rounded-md border-2 transition-all ${
-                        newTopic.color === color.value && !customColor
+                        newTag.color === color.value && !customColor
                           ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
                           : "border-border hover:border-foreground/50"
                       }`}
@@ -1135,19 +1194,19 @@ export default function SourcesPage() {
                 {customColor && (
                   <div className="flex items-center gap-2">
                     <Input
-                      id="topicColor"
+                      id="tagColor"
                       type="color"
-                      value={newTopic.color}
+                      value={newTag.color}
                       onChange={(e) => {
-                        setNewTopic({ ...newTopic, color: e.target.value })
+                        setNewTag({ ...newTag, color: e.target.value })
                         setCustomColor(true)
                       }}
                       className="w-20 h-10"
                     />
                     <Input
-                      value={newTopic.color}
+                      value={newTag.color}
                       onChange={(e) => {
-                        setNewTopic({ ...newTopic, color: e.target.value })
+                        setNewTag({ ...newTag, color: e.target.value })
                         setCustomColor(true)
                       }}
                       placeholder="#3b82f6"
@@ -1159,15 +1218,15 @@ export default function SourcesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => {
-              setCreateTopicDialogOpen(false)
-              setNewTopic({ name: "", abbreviation: "", color: "#3b82f6" })
+              setCreateTagDialogOpen(false)
+              setNewTag({ name: "", abbreviation: "", color: "#3b82f6" })
               setCustomColor(false)
             }}>
               {t.home.cancel}
             </Button>
             <Button
-              onClick={handleCreateTopic}
-              disabled={!newTopic.name}
+              onClick={handleCreateTag}
+              disabled={!newTag.name}
             >
               {t.sources.addDialog.create}
             </Button>
@@ -1352,8 +1411,8 @@ export default function SourcesPage() {
                           }}
                         />
                       </TableHead>
-                      {importColumnOrder.filter((col) => importColumnVisibility[col]).map((col) => (
-                        <TableHead key={col}>{getColumnLabel(col)}</TableHead>
+                      {importColumnOrder.filter((col) => importColumnVisibility[col]).map((col, index, filteredArray) => (
+                        <TableHead key={col} className={showColumnSeparators && index < filteredArray.length - 1 ? "border-r" : ""}>{getColumnLabel(col)}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -1377,25 +1436,25 @@ export default function SourcesPage() {
                               }}
                             />
                           </TableCell>
-                          {importVisibleColumns.map((col) => {
+                          {importVisibleColumns.map((col, colIndex) => {
                             const cellValue = source[col as keyof Source] as string | null
 
                             return (
-                              <TableCell key={col}>
-                                {col === "topics" ? (
-                                  source.topics.length > 0 ? (
+                              <TableCell key={col} className={showColumnSeparators && colIndex < importVisibleColumns.length - 1 ? "border-r" : ""}>
+                                {col === "tags" ? (
+                                  source.tags.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">
-                                      {source.topics.map((topic) => (
+                                      {source.tags.map((tag) => (
                                         <Badge
-                                          key={topic.id}
+                                          key={tag.id}
                                           variant="outline"
                                           style={{
-                                            backgroundColor: topic.color,
+                                            backgroundColor: tag.color,
                                             color: "white",
-                                            borderColor: topic.color,
+                                            borderColor: tag.color,
                                           }}
                                         >
-                                          {topic.abbreviation || topic.name}
+                                          {tag.abbreviation || tag.name}
                                         </Badge>
                                       ))}
                                     </div>
@@ -1637,8 +1696,8 @@ export default function SourcesPage() {
                               }}
                             />
                           </TableHead>
-                          {importColumnOrder.filter((col) => importColumnVisibility[col]).map((col) => (
-                            <TableHead key={col}>{getColumnLabel(col)}</TableHead>
+                          {importColumnOrder.filter((col) => importColumnVisibility[col]).map((col, index, filteredArray) => (
+                            <TableHead key={col} className={showColumnSeparators && index < filteredArray.length - 1 ? "border-r" : ""}>{getColumnLabel(col)}</TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
@@ -1662,7 +1721,7 @@ export default function SourcesPage() {
                                   }}
                                 />
                               </TableCell>
-                              {importVisibleColumns.map((col) => {
+                              {importVisibleColumns.map((col, colIndex) => {
                                 let cellValue: string | null = null
                                 if (col === "abbreviation") cellValue = source.abbreviation || null
                                 else if (col === "title") cellValue = source.title || null
@@ -1674,21 +1733,21 @@ export default function SourcesPage() {
                                 else if (col === "bibtex") cellValue = source.bibtex || null
 
                                 return (
-                                  <TableCell key={col}>
-                                    {col === "topics" ? (
-                                      source.topicNames && source.topicNames.length > 0 ? (
+                                  <TableCell key={col} className={showColumnSeparators && colIndex < importVisibleColumns.length - 1 ? "border-r" : ""}>
+                                    {col === "tags" ? (
+                                      source.tagNames && source.tagNames.length > 0 ? (
                                         <div className="flex flex-wrap gap-1">
-                                          {source.topicNames.map((topicName, i) => (
+                                          {source.tagNames.map((tagName: string, i: number) => (
                                             <Badge
                                               key={i}
                                               variant="outline"
                                               style={{
-                                                backgroundColor: source.topicColors?.[topicName] || "#3b82f6",
+                                                backgroundColor: source.tagColors?.[tagName] || "#3b82f6",
                                                 color: "white",
-                                                borderColor: source.topicColors?.[topicName] || "#3b82f6",
+                                                borderColor: source.tagColors?.[tagName] || "#3b82f6",
                                               }}
                                             >
-                                              {topicName}
+                                              {tagName}
                                             </Badge>
                                           ))}
                                         </div>
@@ -1766,28 +1825,28 @@ export default function SourcesPage() {
               </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Topic Filter</Label>
-                  <Select value={bibtexExportTopicFilter} onValueChange={(v) => { 
-                    setBibtexExportTopicFilter(v)
+                  <Label className="text-xs text-muted-foreground mb-1 block">Tag Filter</Label>
+                  <Select value={bibtexExportTagFilter} onValueChange={(v) => { 
+                    setBibtexExportTagFilter(v)
                     // Reselect all sources with new filter
                     const filtered = v === "all" 
                       ? sources 
-                      : sources.filter(s => s.topics.some(t => t.id === v))
+                      : sources.filter(s => s.tags.some(t => t.id === v))
                     setSelectedBibtexExportSourceIds(new Set(filtered.map(s => s.id)))
                   }}>
                     <SelectTrigger className="w-[150px]">
-                      <SelectValue placeholder="All Topics" />
+                      <SelectValue placeholder="All Tags" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Topics</SelectItem>
-                      {topics.map((topic) => (
-                        <SelectItem key={topic.id} value={topic.id}>
+                      <SelectItem value="all">All Tags</SelectItem>
+                      {tags.map((tag) => (
+                        <SelectItem key={tag.id} value={tag.id}>
                           <div className="flex items-center gap-2">
                             <div
                               className="w-3 h-3 rounded-full border border-border"
-                              style={{ backgroundColor: topic.color }}
+                              style={{ backgroundColor: tag.color }}
                             />
-                            <span>{topic.name}</span>
+                            <span>{tag.name}</span>
                           </div>
                         </SelectItem>
                       ))}
@@ -1819,13 +1878,13 @@ export default function SourcesPage() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <Checkbox
-                        id="bibtex-export-topics"
-                        checked={bibtexExportColumnVisibility.topics}
+                        id="bibtex-export-tags"
+                        checked={bibtexExportColumnVisibility.tags}
                         onCheckedChange={(checked) => {
-                          setBibtexExportColumnVisibility({ ...bibtexExportColumnVisibility, topics: checked as boolean })
+                          setBibtexExportColumnVisibility({ ...bibtexExportColumnVisibility, tags: checked as boolean })
                         }}
                       />
-                      <Label htmlFor="bibtex-export-topics" className="text-sm cursor-pointer">Topics</Label>
+                      <Label htmlFor="bibtex-export-tags" className="text-sm cursor-pointer">Tags</Label>
                     </div>
                   </div>
                 </div>
@@ -1834,9 +1893,9 @@ export default function SourcesPage() {
                     variant="outline" 
                     size="sm" 
                     onClick={() => {
-                      const filtered = bibtexExportTopicFilter === "all" 
+                      const filtered = bibtexExportTagFilter === "all" 
                         ? sources 
-                        : sources.filter(s => s.topics.some(t => t.id === bibtexExportTopicFilter))
+                        : sources.filter(s => s.tags.some(t => t.id === bibtexExportTagFilter))
                       setSelectedBibtexExportSourceIds(new Set(filtered.map(s => s.id)))
                     }}
                   >
@@ -1859,9 +1918,9 @@ export default function SourcesPage() {
                 No sources available
               </div>
             ) : (() => {
-              const filteredSources = bibtexExportTopicFilter === "all" 
+              const filteredSources = bibtexExportTagFilter === "all" 
                 ? sources 
-                : sources.filter(s => s.topics.some(t => t.id === bibtexExportTopicFilter))
+                : sources.filter(s => s.tags.some(t => t.id === bibtexExportTagFilter))
               
               return (
                 <div className="flex-1 overflow-auto border rounded-lg">
@@ -1886,7 +1945,7 @@ export default function SourcesPage() {
                           <TableHead>Publication Date</TableHead>
                           {bibtexExportColumnVisibility.description && <TableHead>Description</TableHead>}
                           {bibtexExportColumnVisibility.notes && <TableHead>Notes</TableHead>}
-                          {bibtexExportColumnVisibility.topics && <TableHead>Topics</TableHead>}
+                          {bibtexExportColumnVisibility.tags && <TableHead>Tags</TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1931,21 +1990,21 @@ export default function SourcesPage() {
                                   <div className="max-w-[250px] text-sm whitespace-pre-wrap break-words">{source.notes || "-"}</div>
                                 </TableCell>
                               )}
-                              {bibtexExportColumnVisibility.topics && (
+                              {bibtexExportColumnVisibility.tags && (
                                 <TableCell>
-                                  {source.topics.length > 0 ? (
+                                  {source.tags.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">
-                                      {source.topics.map((topic) => (
+                                      {source.tags.map((tag) => (
                                         <Badge
-                                          key={topic.id}
+                                          key={tag.id}
                                           variant="outline"
                                           style={{
-                                            backgroundColor: topic.color,
+                                            backgroundColor: tag.color,
                                             color: "white",
-                                            borderColor: topic.color,
+                                            borderColor: tag.color,
                                           }}
                                         >
-                                          {topic.abbreviation || topic.name}
+                                          {tag.abbreviation || tag.name}
                                         </Badge>
                                       ))}
                                     </div>
@@ -1992,51 +2051,51 @@ export default function SourcesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Manage Topics Dialog */}
-      <Dialog open={manageTopicsDialogOpen} onOpenChange={setManageTopicsDialogOpen}>
+      {/* Manage Tags Dialog */}
+      <Dialog open={manageTagsDialogOpen} onOpenChange={setManageTagsDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manage Topics</DialogTitle>
-            <DialogDescription>Add, edit, delete, or merge topics</DialogDescription>
+            <DialogTitle>Manage Tags</DialogTitle>
+            <DialogDescription>Add, edit, delete, or merge tags</DialogDescription>
           </DialogHeader>
           
           <div className="space-y-6">
-            {/* Merge Topics Section */}
+            {/* Merge Tags Section */}
             <div className="space-y-4 border rounded-lg p-4">
               <div className="flex items-center gap-2">
                 <Merge className="h-4 w-4" />
-                <h3 className="font-semibold">Merge Topics</h3>
+                <h3 className="font-semibold">Merge Tags</h3>
               </div>
-              <p className="text-sm text-muted-foreground">Select multiple topics to merge into one</p>
+              <p className="text-sm text-muted-foreground">Select multiple tags to merge into one</p>
               
               <div className="grid gap-4">
                 <div>
-                  <Label>Topics to Merge (select 2 or more)</Label>
+                  <Label>Tags to Merge (select 2 or more)</Label>
                   <div className="mt-2 max-h-[150px] overflow-y-auto border rounded-md p-2 space-y-2">
-                    {topics.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-4">No topics available</p>
+                    {tags.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No tags available</p>
                     ) : (
-                      topics.map((topic) => (
-                        <div key={topic.id} className="flex items-center space-x-2">
+                      tags.map((tag) => (
+                        <div key={tag.id} className="flex items-center space-x-2">
                           <Checkbox
-                            checked={selectedTopicsToMerge.has(topic.id)}
+                            checked={selectedTagsToMerge.has(tag.id)}
                             onCheckedChange={(checked) => {
-                              const newSelected = new Set(selectedTopicsToMerge)
+                              const newSelected = new Set(selectedTagsToMerge)
                               if (checked) {
-                                newSelected.add(topic.id)
+                                newSelected.add(tag.id)
                               } else {
-                                newSelected.delete(topic.id)
+                                newSelected.delete(tag.id)
                               }
-                              setSelectedTopicsToMerge(newSelected)
+                              setSelectedTagsToMerge(newSelected)
                             }}
                           />
                           <Badge
-                            style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                            style={{ backgroundColor: tag.color, color: "white", borderColor: tag.color }}
                             variant="outline"
                           >
-                            {topic.abbreviation || topic.name}
+                            {tag.abbreviation || tag.name}
                           </Badge>
-                          <span className="text-sm">{topic.name}</span>
+                          <span className="text-sm">{tag.name}</span>
                         </div>
                       ))
                     )}
@@ -2046,11 +2105,11 @@ export default function SourcesPage() {
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="grid gap-2">
-                      <Label htmlFor="merge-name">Merged Topic Name *</Label>
+                      <Label htmlFor="merge-name">Merged Tag Name *</Label>
                       <Input
                         id="merge-name"
-                        value={mergeTopicData.name}
-                        onChange={(e) => setMergeTopicData({ ...mergeTopicData, name: e.target.value })}
+                        value={mergeTagData.name}
+                        onChange={(e) => setMergeTagData({ ...mergeTagData, name: e.target.value })}
                         placeholder="Enter name"
                       />
                     </div>
@@ -2058,8 +2117,8 @@ export default function SourcesPage() {
                       <Label htmlFor="merge-abbreviation">Abbreviation</Label>
                       <Input
                         id="merge-abbreviation"
-                        value={mergeTopicData.abbreviation}
-                        onChange={(e) => setMergeTopicData({ ...mergeTopicData, abbreviation: e.target.value })}
+                        value={mergeTagData.abbreviation}
+                        onChange={(e) => setMergeTagData({ ...mergeTagData, abbreviation: e.target.value })}
                         placeholder="Optional"
                       />
                     </div>
@@ -2072,9 +2131,9 @@ export default function SourcesPage() {
                           <button
                             key={color.value}
                             type="button"
-                            onClick={() => setMergeTopicData({ ...mergeTopicData, color: color.value })}
+                            onClick={() => setMergeTagData({ ...mergeTagData, color: color.value })}
                             className={`w-8 h-8 rounded-md border-2 transition-all ${
-                              mergeTopicData.color === color.value
+                              mergeTagData.color === color.value
                                 ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
                                 : "border-border hover:border-foreground/50"
                             }`}
@@ -2086,8 +2145,8 @@ export default function SourcesPage() {
                       <Input
                         id="merge-color"
                         type="color"
-                        value={mergeTopicData.color}
-                        onChange={(e) => setMergeTopicData({ ...mergeTopicData, color: e.target.value })}
+                        value={mergeTagData.color}
+                        onChange={(e) => setMergeTagData({ ...mergeTagData, color: e.target.value })}
                         className="w-12 h-8"
                       />
                     </div>
@@ -2095,10 +2154,10 @@ export default function SourcesPage() {
                 </div>
 
                 <Button
-                  onClick={handleMergeTopics}
-                  disabled={selectedTopicsToMerge.size < 2 || !mergeTopicData.name.trim() || mergingTopics}
+                  onClick={handleMergeTags}
+                  disabled={selectedTagsToMerge.size < 2 || !mergeTagData.name.trim() || mergingTags}
                 >
-                  {mergingTopics ? (
+                  {mergingTags ? (
                     <>
                       <Spinner className="mr-2 h-4 w-4" />
                       Merging...
@@ -2106,51 +2165,51 @@ export default function SourcesPage() {
                   ) : (
                     <>
                       <Merge className="mr-2 h-4 w-4" />
-                      Merge {selectedTopicsToMerge.size} Topic{selectedTopicsToMerge.size !== 1 ? 's' : ''}
+                      Merge {selectedTagsToMerge.size} Tag{selectedTagsToMerge.size !== 1 ? 's' : ''}
                     </>
                   )}
                 </Button>
               </div>
             </div>
 
-            {/* Topics List */}
+            {/* Tags List */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold">All Topics</h3>
+                <h3 className="font-semibold">All Tags</h3>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    setEditingTopic(null)
-                    setEditingTopicData({ name: "", abbreviation: "", color: "#3b82f6" })
-                    setCreateTopicDialogOpen(true)
+                    setEditingTag(null)
+                    setEditingTagData({ name: "", abbreviation: "", color: "#3b82f6" })
+                    setCreateTagDialogOpen(true)
                   }}
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  Add Topic
+                  Add Tag
                 </Button>
               </div>
 
-              {topics.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No topics yet. Create one to get started.</p>
+              {tags.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No tags yet. Create one to get started.</p>
               ) : (
                 <div className="space-y-2">
-                  {topics.map((topic) => (
+                  {tags.map((tag) => (
                     <div
-                      key={topic.id}
+                      key={tag.id}
                       className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <Badge
-                          style={{ backgroundColor: topic.color, color: "white", borderColor: topic.color }}
+                          style={{ backgroundColor: tag.color, color: "white", borderColor: tag.color }}
                           variant="outline"
                         >
-                          {topic.abbreviation || topic.name}
+                          {tag.abbreviation || tag.name}
                         </Badge>
                         <div>
-                          <div className="font-medium">{topic.name}</div>
-                          {topic.abbreviation && topic.abbreviation !== topic.name && (
-                            <div className="text-xs text-muted-foreground">{topic.abbreviation}</div>
+                          <div className="font-medium">{tag.name}</div>
+                          {tag.abbreviation && tag.abbreviation !== tag.name && (
+                            <div className="text-xs text-muted-foreground">{tag.abbreviation}</div>
                           )}
                         </div>
                       </div>
@@ -2159,11 +2218,11 @@ export default function SourcesPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            setEditingTopic(topic)
-                            setEditingTopicData({
-                              name: topic.name,
-                              abbreviation: topic.abbreviation || "",
-                              color: topic.color,
+                            setEditingTag(tag)
+                            setEditingTagData({
+                              name: tag.name,
+                              abbreviation: tag.abbreviation || "",
+                              color: tag.color,
                             })
                           }}
                         >
@@ -2173,8 +2232,8 @@ export default function SourcesPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            setTopicToDelete({ id: topic.id, name: topic.name })
-                            setDeleteTopicDialogOpen(true)
+                            setTagToDelete({ id: tag.id, name: tag.name })
+                            setDeleteTagDialogOpen(true)
                           }}
                           className="text-destructive hover:text-destructive"
                         >
@@ -2189,30 +2248,30 @@ export default function SourcesPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setManageTopicsDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setManageTagsDialogOpen(false)}>
               Close
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Topic Confirmation Dialog */}
-      <AlertDialog open={deleteTopicDialogOpen} onOpenChange={setDeleteTopicDialogOpen}>
+      {/* Delete Tag Confirmation Dialog */}
+      <AlertDialog open={deleteTagDialogOpen} onOpenChange={setDeleteTagDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Topic</AlertDialogTitle>
+            <AlertDialogTitle>Delete Tag</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete &quot;{topicToDelete?.name}&quot;? This will remove it from all sources. This action cannot be undone.
+              Are you sure you want to delete &quot;{tagToDelete?.name}&quot;? This will remove it from all sources. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (topicToDelete) {
-                  handleDeleteTopic(topicToDelete.id)
-                  setDeleteTopicDialogOpen(false)
-                  setTopicToDelete(null)
+                if (tagToDelete) {
+                  handleDeleteTag(tagToDelete.id)
+                  setDeleteTagDialogOpen(false)
+                  setTagToDelete(null)
                 }
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -2223,49 +2282,49 @@ export default function SourcesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Topic Dialog */}
+      {/* Edit Tag Dialog */}
       <Dialog 
-        open={editingTopic !== null} 
+        open={editingTag !== null} 
         onOpenChange={(open) => {
           if (!open) {
-            setEditingTopic(null)
-            setEditingTopicData({ name: "", abbreviation: "", color: "#3b82f6" })
+            setEditingTag(null)
+            setEditingTagData({ name: "", abbreviation: "", color: "#3b82f6" })
           }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Topic</DialogTitle>
+            <DialogTitle>Edit Tag</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-topic-name">Name *</Label>
+              <Label htmlFor="edit-tag-name">Name *</Label>
               <Input
-                id="edit-topic-name"
-                value={editingTopicData.name}
-                onChange={(e) => setEditingTopicData({ ...editingTopicData, name: e.target.value })}
+                id="edit-tag-name"
+                value={editingTagData.name}
+                onChange={(e) => setEditingTagData({ ...editingTagData, name: e.target.value })}
                 required
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-topic-abbreviation">Abbreviation</Label>
+              <Label htmlFor="edit-tag-abbreviation">Abbreviation</Label>
               <Input
-                id="edit-topic-abbreviation"
-                value={editingTopicData.abbreviation}
-                onChange={(e) => setEditingTopicData({ ...editingTopicData, abbreviation: e.target.value })}
+                id="edit-tag-abbreviation"
+                value={editingTagData.abbreviation}
+                onChange={(e) => setEditingTagData({ ...editingTagData, abbreviation: e.target.value })}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-topic-color">Color</Label>
+              <Label htmlFor="edit-tag-color">Color</Label>
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
                   {PREDEFINED_COLORS.map((color) => (
                     <button
                       key={color.value}
                       type="button"
-                      onClick={() => setEditingTopicData({ ...editingTopicData, color: color.value })}
+                      onClick={() => setEditingTagData({ ...editingTagData, color: color.value })}
                       className={`w-10 h-10 rounded-md border-2 transition-all ${
-                        editingTopicData.color === color.value
+                        editingTagData.color === color.value
                           ? "border-foreground ring-2 ring-offset-2 ring-offset-background ring-foreground"
                           : "border-border hover:border-foreground/50"
                       }`}
@@ -2276,15 +2335,15 @@ export default function SourcesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Input
-                    id="edit-topic-color"
+                    id="edit-tag-color"
                     type="color"
-                    value={editingTopicData.color}
-                    onChange={(e) => setEditingTopicData({ ...editingTopicData, color: e.target.value })}
+                    value={editingTagData.color}
+                    onChange={(e) => setEditingTagData({ ...editingTagData, color: e.target.value })}
                     className="w-20 h-10"
                   />
                   <Input
-                    value={editingTopicData.color}
-                    onChange={(e) => setEditingTopicData({ ...editingTopicData, color: e.target.value })}
+                    value={editingTagData.color}
+                    onChange={(e) => setEditingTagData({ ...editingTagData, color: e.target.value })}
                     placeholder="#3b82f6"
                   />
                 </div>
@@ -2292,10 +2351,10 @@ export default function SourcesPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingTopic(null)}>
+            <Button variant="outline" onClick={() => setEditingTag(null)}>
               Cancel
             </Button>
-            <Button onClick={handleUpdateTopic} disabled={!editingTopicData.name.trim()}>
+            <Button onClick={handleUpdateTag} disabled={!editingTagData.name.trim()}>
               Save Changes
             </Button>
           </DialogFooter>

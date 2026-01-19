@@ -48,6 +48,80 @@ export function formatPublicationDate(date: string | null): string {
   return date
 }
 
+/**
+ * Parse date string with various formats (including month names) into ISO format
+ * Supports: yyyy, yyyy-mm, yyyy-mm-dd, "MonthName yyyy", "dd MonthName yyyy"
+ * Month names in English and German (case insensitive)
+ */
+export function parseDateString(dateStr: string | null | undefined): string | null {
+  if (!dateStr || !dateStr.trim()) return null
+
+  const trimmed = dateStr.trim()
+
+  // Already in ISO format: yyyy, yyyy-mm, or yyyy-mm-dd
+  if (/^\d{4}(-\d{2})?(-\d{2})?$/.test(trimmed)) {
+    return trimmed
+  }
+
+  // Month name mappings (English and German, case insensitive)
+  const monthMap: Record<string, number> = {
+    // English
+    january: 1, jan: 1,
+    february: 2, feb: 2,
+    march: 3, mar: 3,
+    april: 4, apr: 4,
+    may: 5,
+    june: 6, jun: 6,
+    july: 7, jul: 7,
+    august: 8, aug: 8,
+    september: 9, sep: 9, sept: 9,
+    october: 10, oct: 10,
+    november: 11, nov: 11,
+    december: 12, dec: 12,
+    // German
+    januar: 1,
+    februar: 2,
+    märz: 3, marz: 3,
+    april: 4,
+    mai: 5,
+    juni: 6,
+    juli: 7,
+    august: 8,
+    september: 9,
+    oktober: 10,
+    november: 11,
+    dezember: 12,
+  }
+
+  // Pattern 1: "MonthName yyyy" (e.g., "September 2015", "september 2015")
+  const monthYearMatch = trimmed.match(/^([a-zA-ZäÄöÖüÜß]+)\s+(\d{4})$/i)
+  if (monthYearMatch) {
+    const monthName = monthYearMatch[1].toLowerCase()
+    const year = monthYearMatch[2]
+    const monthNum = monthMap[monthName]
+    if (monthNum) {
+      const monthStr = String(monthNum).padStart(2, "0")
+      return `${year}-${monthStr}`
+    }
+  }
+
+  // Pattern 2: "dd MonthName yyyy" (e.g., "11 December 2024", "11. Dezember 2024")
+  const dayMonthYearMatch = trimmed.match(/^(\d{1,2})[.\s]+([a-zA-ZäÄöÖüÜß]+)\s+(\d{4})$/i)
+  if (dayMonthYearMatch) {
+    const day = dayMonthYearMatch[1].padStart(2, "0")
+    const monthName = dayMonthYearMatch[2].toLowerCase()
+    const year = dayMonthYearMatch[3]
+    const monthNum = monthMap[monthName]
+    if (monthNum) {
+      const monthStr = String(monthNum).padStart(2, "0")
+      return `${year}-${monthStr}-${day}`
+    }
+  }
+
+  // If no pattern matches, return as-is (let other parts of the system handle it)
+  return trimmed
+}
+
 
 /**
  * Parse CSV text into array of records
@@ -122,9 +196,9 @@ export function parseCSV(csvText: string): Array<Record<string, string>> {
  * Convert sources to CSV format and trigger download
  */
 export function exportToCSV(sources: Source[], projectName: string, sourcesWord: string) {
-  const headers = ["abbreviation", "title", "authors", "publicationDate", "description", "notes", "links", "bibtex", "topics"]
+  const headers = ["abbreviation", "title", "authors", "publicationDate", "description", "notes", "links", "bibtex", "tags"]
   const rows = sources.map((source) => {
-    const topicsStr = source.topics
+    const tagsStr = source.tags
       .map((t) => {
         if (t.abbreviation) {
           return `${t.name} (${t.abbreviation})`
@@ -141,7 +215,7 @@ export function exportToCSV(sources: Source[], projectName: string, sourcesWord:
       source.notes || "",
       source.links || "",
       source.bibtex || "",
-      topicsStr,
+      tagsStr,
     ]
   })
 
@@ -178,7 +252,7 @@ export function exportToCSV(sources: Source[], projectName: string, sourcesWord:
  */
 export function exportToJSON(sources: Source[], projectName: string, sourcesWord: string) {
   const jsonData = sources.map((source) => {
-    const topics = source.topics.map((t) => ({
+    const tags = source.tags.map((t) => ({
       name: t.name,
       abbreviation: t.abbreviation || null,
       color: t.color,
@@ -192,7 +266,7 @@ export function exportToJSON(sources: Source[], projectName: string, sourcesWord
       notes: source.notes,
       links: source.links,
       bibtex: source.bibtex,
-      topics,
+      tags,
     }
   })
 
@@ -373,7 +447,7 @@ export function parseImportFile(
     notes?: string
     links?: string
     bibtex?: string
-    topics?: string | Array<string | { name?: string; color?: string; abbreviation?: string }>
+    tags?: string | Array<string | { name?: string; color?: string; abbreviation?: string }>
     // Miro CSV fields
     ID?: string
     Titel?: string
@@ -398,9 +472,9 @@ export function parseImportFile(
   }
 
   return parsedData.map((row: ParsedRow) => {
-    let topics: string[] = []
-    const topicColors: Record<string, string> = {}
-    const topicAbbreviations: Record<string, string> = {}
+    let tags: string[] = []
+    const tagColors: Record<string, string> = {}
+    const tagAbbreviations: Record<string, string> = {}
 
     // Handle Miro CSV format
     if (importType === "miro-csv") {
@@ -410,36 +484,37 @@ export function parseImportFile(
       const description = row.Beschreibung || row.description || null
       const notes = row["Weitere Notizen"] || row.notes || null
       const authors = normalizeAuthors(row.Autor || row.authors || null)
-      const publicationDate = row.Jahr || row.publicationDate || null
+      const rawPublicationDate = row.Jahr || row.publicationDate || null
+      const publicationDate = rawPublicationDate ? parseDateString(String(rawPublicationDate)) : null
       // Links: keep as free text, preserve newlines
       const links = row.Link || row.links || null
       
-      // Handle topics (Themengebiet)
+      // Handle tags (Themengebiet)
       const themengebiet = row.Themengebiet || ""
       if (themengebiet && typeof themengebiet === "string") {
-        const topicNames = themengebiet.split(";").map(t => t.trim()).filter(t => t)
-        topics = topicNames
+        const tagNames = themengebiet.split(";").map(t => t.trim()).filter(t => t)
+        tags = tagNames
       }
 
       return {
         abbreviation: abbreviation ? String(abbreviation) : null,
         title: title ? String(title) : "",
         authors: authors,
-        publicationDate: publicationDate ? String(publicationDate) : null,
+        publicationDate: publicationDate,
         description: description ? String(description) : null,
         notes: notes ? String(notes) : null,
         links: links ? String(links) : null,
         bibtex: null, // Will be generated from other fields
-        topicNames: topics,
-        topicColors,
-        topicAbbreviations,
+        tagNames: tags,
+        tagColors,
+        tagAbbreviations,
       }
     }
 
     // Handle standard CSV/JSON format
-    if (row.topics) {
-      if (typeof row.topics === "string") {
-        topics = row.topics
+    if (row.tags) {
+      if (typeof row.tags === "string") {
+        tags = row.tags
           .split(";")
           .map((t: string) => {
             const trimmed = t.trim()
@@ -448,23 +523,23 @@ export function parseImportFile(
             if (match) {
               const name = match[1].trim()
               const abbrev = match[2].trim()
-              topicAbbreviations[name] = abbrev
+              tagAbbreviations[name] = abbrev
               return name
             }
             return trimmed
           })
           .filter((t: string | null): t is string => t !== null)
-      } else if (Array.isArray(row.topics)) {
-        topics = row.topics
+      } else if (Array.isArray(row.tags)) {
+        tags = row.tags
           .map((t: string | { name?: string; color?: string; abbreviation?: string }) => {
             if (typeof t === "string") {
               return t
             } else if (t.name) {
               if (t.color) {
-                topicColors[t.name] = t.color
+                tagColors[t.name] = t.color
               }
               if (t.abbreviation) {
-                topicAbbreviations[t.name] = t.abbreviation
+                tagAbbreviations[t.name] = t.abbreviation
               }
               return t.name
             }
@@ -474,18 +549,21 @@ export function parseImportFile(
       }
     }
 
+    const rawPublicationDate = row.publicationDate || null
+    const publicationDate = rawPublicationDate ? parseDateString(String(rawPublicationDate)) : null
+
     return {
       abbreviation: row.abbreviation || null,
       title: row.title || "",
       authors: normalizeAuthors(row.authors || null),
-      publicationDate: row.publicationDate || null,
+      publicationDate: publicationDate,
       description: row.description || null,
       notes: row.notes || null,
       links: row.links || null,
       bibtex: row.bibtex || null,
-      topicNames: topics,
-      topicColors,
-      topicAbbreviations,
+      tagNames: tags,
+      tagColors,
+      tagAbbreviations,
     }
   })
 }

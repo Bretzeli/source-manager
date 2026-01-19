@@ -13,7 +13,7 @@ export type Source = {
   notes: string | null
   links: string | null
   bibtex: string | null
-  topics: Array<{
+  tags: Array<{
     id: string
     abbreviation: string
     name: string
@@ -21,7 +21,7 @@ export type Source = {
   }>
 }
 
-export type Topic = {
+export type Tag = {
   id: string
   projectId: string
   abbreviation: string
@@ -31,14 +31,14 @@ export type Topic = {
   color: string
 }
 
-export type ColumnKey = "abbreviation" | "title" | "authors" | "publicationDate" | "topics" | "description" | "notes" | "links" | "bibtex"
+export type ColumnKey = "abbreviation" | "title" | "authors" | "publicationDate" | "tags" | "description" | "notes" | "links" | "bibtex"
 
-export const COLUMN_ORDER: ColumnKey[] = ["abbreviation", "title", "authors", "publicationDate", "topics", "description", "notes", "links", "bibtex"]
+export const COLUMN_ORDER: ColumnKey[] = ["abbreviation", "title", "authors", "publicationDate", "tags", "description", "notes", "links", "bibtex"]
 
 export type SourcePreferences = {
   columnVisibility: Record<ColumnKey, boolean>
   columnOrder: ColumnKey[]
-  topicFilter: string
+  tagFilter: string
   yearFromFilter: string
   yearToFilter: string
   authorFilter: string
@@ -54,8 +54,8 @@ export type ImportSourceData = {
   notes?: string | null
   links?: string | null
   bibtex?: string | null
-  topicNames?: string[]
-  topicColors?: Record<string, string>
-  topicAbbreviations?: Record<string, string>
+  tagNames?: string[]
+  tagColors?: Record<string, string>
+  tagAbbreviations?: Record<string, string>
 }
 
