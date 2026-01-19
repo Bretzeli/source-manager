@@ -50,7 +50,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge } from "lucide-react"
+import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ColumnKey, Source } from "@/types/sources"
 
@@ -195,6 +195,7 @@ export default function SourcesPage() {
   const [showColumnSeparators, setShowColumnSeparators] = React.useState(false)
   const [deleteTagDialogOpen, setDeleteTagDialogOpen] = React.useState(false)
   const [tagToDelete, setTagToDelete] = React.useState<{ id: string; name: string } | null>(null)
+  const [fullScreen, setFullScreen] = React.useState(false)
 
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
@@ -364,14 +365,16 @@ export default function SourcesPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">{t.sources.title}</h1>
-        <p className="text-muted-foreground mt-1">{t.sources.manageSources}</p>
-      </div>
+    <div className={`${fullScreen ? "px-0" : "container mx-auto px-4"} py-8`}>
+      {!fullScreen && (
+        <div className="mb-8">
+          <h1 className="text-3xl font-semibold tracking-tight">{t.sources.title}</h1>
+          <p className="text-muted-foreground mt-1">{t.sources.manageSources}</p>
+        </div>
+      )}
 
       {/* Table Operations: Search, Filters, Column Settings */}
-      <div className="mb-4 p-4 border rounded-lg bg-muted/30">
+      <div className={`mb-4 p-4 border rounded-lg bg-muted/30 ${fullScreen ? "mx-4" : ""}`}>
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-[200px]">
             <Label className="text-xs text-muted-foreground mb-1 block">Search</Label>
@@ -561,7 +564,7 @@ export default function SourcesPage() {
       </div>
 
       {/* Actions: Add, Import, Export, Delete */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className={`mb-4 flex flex-wrap items-center gap-2 ${fullScreen ? "mx-4" : ""}`}>
         <Button onClick={() => setAddDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           {t.sources.addSource}
@@ -631,7 +634,7 @@ export default function SourcesPage() {
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-4 mb-2">
+          <div className={`flex items-center gap-4 mb-2 ${fullScreen ? "mx-4" : ""}`}>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="keep-table-width"
@@ -652,8 +655,27 @@ export default function SourcesPage() {
                 {t.sources.columnSettings.showColumnSeparators}
               </Label>
             </div>
+            <div className="flex-1"></div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFullScreen(!fullScreen)}
+              className="ml-auto"
+            >
+              {fullScreen ? (
+                <>
+                  <Minimize className="mr-2 h-4 w-4" />
+                  Exit Full Screen
+                </>
+              ) : (
+                <>
+                  <Maximize className="mr-2 h-4 w-4" />
+                  Full Screen
+                </>
+              )}
+            </Button>
           </div>
-          <div className="border rounded-lg overflow-x-auto">
+          <div className={`border rounded-lg overflow-x-auto ${fullScreen ? "w-screen ml-[calc(-50vw+50%)] mr-[calc(-50vw+50%)]" : ""}`}>
             <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow>
@@ -887,7 +909,7 @@ export default function SourcesPage() {
           </div>
 
           {/* Pagination */}
-          <div className="mt-4 flex items-center justify-between">
+          <div className={`mt-4 flex items-center justify-between ${fullScreen ? "mx-4" : ""}`}>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">
                 {t.sources.pagination.showing} {pageSize === "all" ? filteredAndSortedSources.length : (currentPage - 1) * pageSize + 1}-
