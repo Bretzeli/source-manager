@@ -153,6 +153,7 @@ export default function SourcesPage() {
     handleDeleteAllClick,
     handleDeleteAllConfirm,
     handleCopyBibtex,
+    handleAutoGenerateBibtex,
     handleAddSource,
     handleCreateTag,
     handleSort,
@@ -885,6 +886,10 @@ export default function SourcesPage() {
                             <DropdownMenuItem onClick={() => handleCopyBibtex(source.bibtex)}>
                               <Copy className="mr-2 h-4 w-4" />
                               {t.sources.copyBibtex}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleAutoGenerateBibtex(source.id)}>
+                              <FileText className="mr-2 h-4 w-4" />
+                              {t.sources.autoGenerateBibtex}
                             </DropdownMenuItem>
                             <DropdownMenuItem disabled>
                               <FileText className="mr-2 h-4 w-4" />

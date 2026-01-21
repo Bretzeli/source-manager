@@ -382,44 +382,36 @@ export function useSources() {
         tagIds?: string[]
       } = { [editingCell.column]: editValue || null }
 
+      // Bibtex to fields: fills fields when bibtex is entered/changed (one-way)
       if (editingCell.column === "bibtex") {
         const parsed = parseBibtex(editValue)
         if (parsed) {
           const fields = bibtexToSourceFields(parsed)
-          updateData.title = fields.title || source.title
-          updateData.authors = fields.authors || source.authors
-          updateData.publicationDate = fields.publicationDate || source.publicationDate
+          // Always sync abbreviation from bibtex key (bidirectional for abbreviation)
           updateData.abbreviation = fields.abbreviation ?? source.abbreviation ?? undefined
+          // Fill other fields (one-way from bibtex to fields, only on new source creation)
+          // But for existing sources, only fill if empty
+          if (fields.title && (!source.title || source.title.trim() === "")) {
+            updateData.title = fields.title
+          }
+          if (fields.authors && (!source.authors || source.authors.trim() === "")) {
+            updateData.authors = fields.authors
+          }
+          if (fields.publicationDate && (!source.publicationDate || source.publicationDate.trim() === "")) {
+            updateData.publicationDate = fields.publicationDate
+          }
         }
-      } else {
-        const currentBibtex = source.bibtex ? parseBibtex(source.bibtex) : null
-        if (currentBibtex) {
-          const sourceFields = {
-            title: editingCell.column === "title" ? editValue : source.title,
-            authors: editingCell.column === "authors" ? editValue : source.authors,
-            publicationDate: editingCell.column === "publicationDate" ? editValue : source.publicationDate,
-          }
-
-          const beforeEdit = {
-            title: source.title,
-            authors: source.authors ?? undefined,
-            publicationDate: source.publicationDate ?? undefined,
-          }
-
-          if (bibtexFieldsMatch(currentBibtex, currentBibtex, beforeEdit)) {
-            const newBibtex = sourceFieldsToBibtex({
-              abbreviation: source.abbreviation || "",
-              title: sourceFields.title || "",
-              authors: sourceFields.authors || null,
-              publicationDate: sourceFields.publicationDate || null,
-              description: source.description,
-              notes: source.notes,
-              links: source.links,
-            })
-            updateData.bibtex = serializeBibtex(newBibtex)
+      } else if (editingCell.column === "abbreviation") {
+        // Abbreviation always syncs bidirectionally with bibtex key
+        if (source.bibtex) {
+          const parsed = parseBibtex(source.bibtex)
+          if (parsed) {
+            parsed.key = editValue || "source"
+            updateData.bibtex = serializeBibtex(parsed)
           }
         }
       }
+      // Do NOT sync other column changes (title, authors, publicationDate) to bibtex
 
       await updateSource(projectId, editingCell.sourceId, updateData)
 
@@ -520,12 +512,47 @@ export function useSources() {
     }
   }
 
+  const handleAutoGenerateBibtex = async (sourceId: string) => {
+    const source = sources.find((s) => s.id === sourceId)
+    if (!source) return
+
+    try {
+      const bibtexEntry = sourceFieldsToBibtex({
+        abbreviation: source.abbreviation || "",
+        title: source.title || "",
+        authors: source.authors || null,
+        publicationDate: source.publicationDate || null,
+        description: source.description || null,
+        notes: source.notes || null,
+        links: source.links || null,
+      })
+      const generatedBibtex = serializeBibtex(bibtexEntry)
+
+      await updateSource(projectId, sourceId, { bibtex: generatedBibtex })
+
+      setSources((prevSources) =>
+        prevSources.map((s) => {
+          if (s.id === sourceId) {
+            return { ...s, bibtex: generatedBibtex }
+          }
+          return s
+        })
+      )
+
+      toast.success(t.sources.bibtexGenerated)
+    } catch (error) {
+      toast.error(t.errors.generic)
+      console.error(error)
+    }
+  }
+
   const handleAddSource = async () => {
     try {
       setCreating(true)
 
       const sourceData = { ...newSource }
 
+      // If bibtex is provided, parse it and fill other fields (one-way sync)
       if (newSource.bibtex.trim()) {
         const parsed = parseBibtex(newSource.bibtex)
         if (parsed) {
@@ -543,20 +570,8 @@ export function useSources() {
             sourceData.publicationDate = bibtexFields.publicationDate
           }
         }
-      } else {
-        if (sourceData.title) {
-          const bibtexEntry = sourceFieldsToBibtex({
-            abbreviation: sourceData.abbreviation || "",
-            title: sourceData.title,
-            authors: sourceData.authors || null,
-            publicationDate: sourceData.publicationDate || null,
-            description: sourceData.description || null,
-            notes: sourceData.notes || null,
-            links: sourceData.links || null,
-          })
-          sourceData.bibtex = serializeBibtex(bibtexEntry)
-        }
       }
+      // Do NOT auto-generate bibtex from fields when adding a new source
 
       await createSource(projectId, {
         abbreviation: sourceData.abbreviation || null,
@@ -971,6 +986,7 @@ export function useSources() {
     handleDeleteAllClick,
     handleDeleteAllConfirm,
     handleCopyBibtex,
+    handleAutoGenerateBibtex,
     handleAddSource,
     handleCreateTag,
     handleSort,

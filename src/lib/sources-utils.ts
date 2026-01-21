@@ -500,7 +500,7 @@ export function parseImportFile(
         description: description ? String(description) : null,
         notes: notes ? String(notes) : null,
         links: links ? String(links) : null,
-        bibtex: null, // Will be generated from other fields
+        bibtex: null, // Miro CSV does not auto-generate bibtex
         tagNames: tags,
         tagColors,
         tagAbbreviations,

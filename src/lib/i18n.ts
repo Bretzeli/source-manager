@@ -90,6 +90,8 @@ const translations = {
       sourceDeleted: "Source deleted successfully",
       copyBibtex: "Copy BibTeX",
       bibtexCopied: "BibTeX copied to clipboard",
+      autoGenerateBibtex: "Auto-generate BibTeX",
+      bibtexGenerated: "BibTeX generated successfully",
       addCitation: "Add Citation",
       columns: {
         abbreviation: "Abbreviation",
@@ -349,6 +351,8 @@ const translations = {
       sourceDeleted: "Quelle erfolgreich gelöscht",
       copyBibtex: "BibTeX kopieren",
       bibtexCopied: "BibTeX in Zwischenablage kopiert",
+      autoGenerateBibtex: "BibTeX automatisch generieren",
+      bibtexGenerated: "BibTeX erfolgreich generiert",
       addCitation: "Zitat hinzufügen",
       columns: {
         abbreviation: "Abkürzung",

@@ -635,20 +635,10 @@ export async function batchImportSources(
       continue
     }
 
-    // Generate BibTeX if not provided
-    let bibtex = sourceData.bibtex?.trim() || null
-    if (!bibtex && sourceData.title) {
-      const bibtexEntry = sourceFieldsToBibtex({
-        abbreviation: sourceData.abbreviation || "",
-        title: sourceData.title,
-        authors: sourceData.authors || null,
-        publicationDate: sourceData.publicationDate || null,
-        description: sourceData.description || null,
-        notes: sourceData.notes || null,
-        links: sourceData.links || null,
-      })
-      bibtex = serializeBibtex(bibtexEntry)
-    }
+    // Use provided bibtex - do NOT auto-generate
+    // Miro CSV imports explicitly set bibtex to null, so we keep it null
+    // Regular CSV/JSON imports will have bibtex if provided in the file
+    const bibtex = sourceData.bibtex?.trim() || null
 
     // Create the source
     const [newSource] = await db
