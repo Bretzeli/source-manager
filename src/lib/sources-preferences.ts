@@ -40,14 +40,14 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
   const pageSize = getCookie(`${prefix}pageSize`)
 
   return {
-    columnVisibility: columnVisibility ? JSON.parse(columnVisibility) : null,
-    columnOrder: columnOrder ? JSON.parse(columnOrder) : null,
-    columnWidths: columnWidths ? JSON.parse(columnWidths) : null,
-    tagFilter: tagFilter || null,
-    yearFromFilter: yearFromFilter || null,
-    yearToFilter: yearToFilter || null,
-    authorFilter: authorFilter || null,
-    pageSize: pageSize ? (pageSize === "all" ? "all" : parseInt(pageSize)) : null,
+    columnVisibility: columnVisibility ? JSON.parse(columnVisibility) : undefined,
+    columnOrder: columnOrder ? JSON.parse(columnOrder) : undefined,
+    columnWidths: columnWidths ? JSON.parse(columnWidths) : undefined,
+    tagFilter: tagFilter || undefined,
+    yearFromFilter: yearFromFilter || undefined,
+    yearToFilter: yearToFilter || undefined,
+    authorFilter: authorFilter || undefined,
+    pageSize: pageSize ? (pageSize === "all" ? "all" : parseInt(pageSize)) : undefined,
   }
 }
 

@@ -121,7 +121,7 @@ export function bibtexToSourceFields(bibtexEntry: BibtexEntry): {
  * Convert source fields to BibTeX entry
  */
 export function sourceFieldsToBibtex(data: {
-  abbreviation: string
+  abbreviation: string | null | undefined
   title: string
   authors?: string | null
   publicationDate?: string | null

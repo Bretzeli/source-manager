@@ -389,7 +389,7 @@ export function useSources() {
           updateData.title = fields.title || source.title
           updateData.authors = fields.authors || source.authors
           updateData.publicationDate = fields.publicationDate || source.publicationDate
-          updateData.abbreviation = fields.abbreviation || source.abbreviation
+          updateData.abbreviation = fields.abbreviation ?? source.abbreviation ?? undefined
         }
       } else {
         const currentBibtex = source.bibtex ? parseBibtex(source.bibtex) : null
@@ -408,7 +408,7 @@ export function useSources() {
 
           if (bibtexFieldsMatch(currentBibtex, currentBibtex, beforeEdit)) {
             const newBibtex = sourceFieldsToBibtex({
-              abbreviation: source.abbreviation,
+              abbreviation: source.abbreviation || "",
               title: sourceFields.title || "",
               authors: sourceFields.authors || null,
               publicationDate: sourceFields.publicationDate || null,

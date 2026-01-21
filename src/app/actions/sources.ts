@@ -83,7 +83,7 @@ export async function getSources(projectId: string) {
       
       let sourceTagsData: Array<{
         id: string
-        abbreviation: string
+        abbreviation: string | null
         name: string
         color: string
       }> = []
@@ -200,7 +200,7 @@ export async function updateSource(
   projectId: string,
   sourceId: string,
   data: {
-    abbreviation?: string
+    abbreviation?: string | null
     title?: string
     description?: string | null
     authors?: string | null
@@ -241,7 +241,7 @@ export async function updateSource(
 
   const updateData: Partial<typeof sources.$inferInsert> = {}
   
-  if (data.abbreviation !== undefined) updateData.abbreviation = data.abbreviation.trim()
+  if (data.abbreviation !== undefined) updateData.abbreviation = data.abbreviation?.trim() || null
   if (data.title !== undefined) updateData.title = data.title.trim()
   if (data.description !== undefined) updateData.description = data.description?.trim() || null
   if (data.authors !== undefined) updateData.authors = data.authors?.trim() || null

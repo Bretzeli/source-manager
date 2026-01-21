@@ -130,7 +130,7 @@ export function AuthModal({ fullyCover: propFullyCover }: AuthModalProps) {
       if (errorMessage.includes("client_id") || errorMessage.includes("empty")) {
         toast.error(`${provider} OAuth is not properly configured. Please set ${provider.toUpperCase()}_CLIENT_ID and ${provider.toUpperCase()}_CLIENT_SECRET in your environment variables.`)
       } else {
-        toast.error(errorMessage || t.errors.generic)
+        toast.error(errorMessage)
       }
       setIsLoading(false)
     }

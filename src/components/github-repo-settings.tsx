@@ -597,9 +597,8 @@ export function GithubRepoSettings({
                         value={repoUrl}
                         onValueChange={handleRepoSelect}
                         disabled={isSaving || isUnlinking || isDisconnecting || isLoadingRepos}
-                        className="flex-1"
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className="flex-1">
                           <SelectValue placeholder={isLoadingRepos ? t.settings.github.loadingRepos : t.settings.github.chooseRepository} />
                         </SelectTrigger>
                         <SelectContent>

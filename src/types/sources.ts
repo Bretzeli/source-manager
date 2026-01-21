@@ -5,7 +5,7 @@
 export type Source = {
   id: string
   projectId: string
-  abbreviation: string
+  abbreviation: string | null
   title: string
   description: string | null
   authors: string | null
@@ -15,7 +15,7 @@ export type Source = {
   bibtex: string | null
   tags: Array<{
     id: string
-    abbreviation: string
+    abbreviation: string | null
     name: string
     color: string
   }>
@@ -24,7 +24,7 @@ export type Source = {
 export type Tag = {
   id: string
   projectId: string
-  abbreviation: string
+  abbreviation: string | null
   name: string
   description: string | null
   notes: string | null
@@ -38,6 +38,7 @@ export const COLUMN_ORDER: ColumnKey[] = ["abbreviation", "title", "authors", "p
 export type SourcePreferences = {
   columnVisibility: Record<ColumnKey, boolean>
   columnOrder: ColumnKey[]
+  columnWidths?: Record<ColumnKey, number>
   tagFilter: string
   yearFromFilter: string
   yearToFilter: string
