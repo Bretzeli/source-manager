@@ -49,10 +49,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { AutoResizeTextarea } from "@/components/auto-resize-textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize } from "lucide-react"
+import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize, FileDown } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ColumnKey, Source } from "@/types/sources"
+import { PDFExportDialog } from "@/components/pdf-export-dialog"
 
 const PREDEFINED_COLORS = [
   { name: "Blue", value: "#3b82f6" },
@@ -108,11 +110,15 @@ export default function SourcesPage() {
     setYearToFilter,
     authorFilter,
     setAuthorFilter,
+    citationUsageFilter,
+    setCitationUsageFilter,
     sortColumn,
     pageSize,
     setPageSize,
     currentPage,
     setCurrentPage,
+    autoResizeTextarea,
+    setAutoResizeTextarea,
     editingCell,
     editValue,
     setEditValue,
@@ -188,6 +194,13 @@ export default function SourcesPage() {
     mergeTagData,
     setMergeTagData,
     handleMergeTags,
+    pdfExportDialogOpen,
+    setPdfExportDialogOpen,
+    handleOpenPdfExport,
+    handlePdfExport,
+    projectName,
+    projectDescription,
+    citationData,
   } = useSources()
 
   const [isResizing, setIsResizing] = React.useState(false)
@@ -197,6 +210,7 @@ export default function SourcesPage() {
   const [deleteTagDialogOpen, setDeleteTagDialogOpen] = React.useState(false)
   const [tagToDelete, setTagToDelete] = React.useState<{ id: string; name: string } | null>(null)
   const [fullScreen, setFullScreen] = React.useState(false)
+  const [cellDimensions, setCellDimensions] = React.useState<{ width: number; height: number } | null>(null)
 
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
@@ -467,6 +481,20 @@ export default function SourcesPage() {
             </Select>
           </div>
 
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Citation Usage</Label>
+            <Select value={citationUsageFilter} onValueChange={(v) => { setCitationUsageFilter(v); setCurrentPage(1) }}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="All sources" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sources</SelectItem>
+                <SelectItem value="used">Used (cited)</SelectItem>
+                <SelectItem value="unused">Unused (not cited)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm">
@@ -479,7 +507,7 @@ export default function SourcesPage() {
             <div>
               <Label className="text-sm font-medium">{t.sources.columnSettings.showHide}</Label>
               <p className="text-xs text-muted-foreground mb-2">{t.sources.columnSettings.reorder}</p>
-              <div className="mt-2 space-y-2">
+              <div className="mt-2 space-y-2 max-h-[400px] overflow-y-auto">
                 {columnOrder.map((col, index) => (
                   <div
                     key={col}
@@ -558,6 +586,18 @@ export default function SourcesPage() {
                 ))}
               </div>
             </div>
+            <div className="flex items-center space-x-2 pt-2 border-t">
+              <Checkbox
+                id="autoResizeTextarea"
+                checked={autoResizeTextarea}
+                onCheckedChange={(checked) => {
+                  setAutoResizeTextarea(checked as boolean)
+                }}
+              />
+              <Label htmlFor="autoResizeTextarea" className="text-sm font-normal cursor-pointer">
+                Auto-resize textarea when editing
+              </Label>
+            </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -592,6 +632,11 @@ export default function SourcesPage() {
             <DropdownMenuItem onClick={handleOpenBibtexExport}>
               <FileText className="mr-2 h-4 w-4" />
               BibTeX
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleOpenPdfExport}>
+              <FileDown className="mr-2 h-4 w-4" />
+              PDF
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -726,18 +771,28 @@ export default function SourcesPage() {
                         return (
                           <TableCell
                             key={col}
-                            onDoubleClick={col !== "tags" ? () => handleCellDoubleClick(source.id, col, cellValue) : undefined}
+                            onDoubleClick={
+                              col !== "tags"
+                                ? (e) => {
+                                    const cell = e.currentTarget
+                                    const rect = cell.getBoundingClientRect()
+                                    setCellDimensions({ width: rect.width, height: rect.height })
+                                    handleCellDoubleClick(source.id, col, cellValue)
+                                  }
+                                : undefined
+                            }
                             className={`${col !== "tags" && col !== "bibtex" ? "cursor-pointer" : ""} break-words whitespace-normal ${showColumnSeparators && colIndex < visibleColumns.length - 1 ? "border-r" : ""}`}
                             style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
                                 {(col === "bibtex" || col === "description" || col === "notes" || col === "links") ? (
-                                  <Textarea
+                                  <AutoResizeTextarea
                                     value={editValue}
                                     onChange={(e) => setEditValue(e.target.value)}
                                     onBlur={(e) => {
                                       if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).closest('button[title="Cancel"]')) {
+                                        setCellDimensions(null)
                                         handleCellSave()
                                       }
                                     }}
@@ -747,12 +802,15 @@ export default function SourcesPage() {
                                         handleCellSave()
                                       } else if (e.key === "Escape") {
                                         e.preventDefault()
+                                        setCellDimensions(null)
                                         handleCellCancel()
                                       }
                                     }}
                                     autoFocus
-                                    rows={col === "bibtex" ? 6 : 3}
-                                    className="min-w-[300px]"
+                                    autoResize={autoResizeTextarea}
+                                    initialWidth={cellDimensions ? cellDimensions.width - 40 : undefined}
+                                    initialHeight={cellDimensions?.height}
+                                    className="flex-1"
                                   />
                                 ) : (
                                   <Input
@@ -782,7 +840,10 @@ export default function SourcesPage() {
                                   onMouseDown={(e) => {
                                     e.preventDefault()
                                   }}
-                                  onClick={handleCellCancel}
+                                  onClick={() => {
+                                    setCellDimensions(null)
+                                    handleCellCancel()
+                                  }}
                                   title="Cancel"
                                 >
                                   <X className="h-4 w-4" />
@@ -2077,6 +2138,18 @@ export default function SourcesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* PDF Export Dialog */}
+      <PDFExportDialog
+        open={pdfExportDialogOpen}
+        onOpenChange={setPdfExportDialogOpen}
+        sources={filteredAndSortedSources}
+        projectTitle={projectName}
+        projectDescription={projectDescription}
+        citationData={citationData}
+        columnVisibility={columnVisibility}
+        onExport={handlePdfExport}
+      />
 
       {/* Manage Tags Dialog */}
       <Dialog open={manageTagsDialogOpen} onOpenChange={setManageTagsDialogOpen}>

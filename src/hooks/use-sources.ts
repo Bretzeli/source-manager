@@ -8,9 +8,12 @@ import { toast } from "sonner"
 import { useTranslations } from "@/lib/i18n"
 import { getSources, getTags, createSource, updateSource, deleteSource, deleteAllSources, createTag, updateTag, deleteTag, mergeTags, batchImportSources } from "@/app/actions/sources"
 import { getProject } from "@/app/actions/projects"
+import { getCitationsFromGithub } from "@/app/actions/citations"
 import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
 import { loadPreferences, savePreferences } from "@/lib/sources-preferences"
 import { parseImportFile, exportToCSV, exportToJSON, formatPublicationDate, sanitizeFilename } from "@/lib/sources-utils"
+import { downloadPDF } from "@/lib/pdf-export"
+import type { PDFExportConfig } from "@/components/pdf-export-dialog"
 import type { Source, Tag, ColumnKey, ImportSourceData } from "@/types/sources"
 import { COLUMN_ORDER } from "@/types/sources"
 
@@ -22,6 +25,7 @@ export function useSources() {
   const [sources, setSources] = useState<Source[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [projectName, setProjectName] = useState<string>("")
+  const [projectDescription, setProjectDescription] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -62,11 +66,15 @@ export function useSources() {
   const [yearFromFilter, setYearFromFilter] = useState<string>("all")
   const [yearToFilter, setYearToFilter] = useState<string>("all")
   const [authorFilter, setAuthorFilter] = useState<string>("all")
+  const [citationUsageFilter, setCitationUsageFilter] = useState<string>("all") // "all", "used", "unused"
+  const [citationData, setCitationData] = useState<{ sourceUsage: Record<string, number> } | null>(null)
   const [sortColumn, setSortColumn] = useState<ColumnKey | null>(null)
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
 
   const [pageSize, setPageSize] = useState<number | "all">(25)
   const [currentPage, setCurrentPage] = useState(1)
+
+  const [autoResizeTextarea, setAutoResizeTextarea] = useState<boolean>(true)
 
   const [editingCell, setEditingCell] = useState<{ sourceId: string; column: ColumnKey } | null>(null)
   const [editValue, setEditValue] = useState("")
@@ -139,6 +147,8 @@ export function useSources() {
     color: "#3b82f6",
   })
 
+  const [pdfExportDialogOpen, setPdfExportDialogOpen] = useState(false)
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
@@ -151,6 +161,17 @@ export function useSources() {
       setTags(tagsData as Tag[])
       if (projectData) {
         setProjectName(projectData.title)
+        setProjectDescription(projectData.description)
+      }
+      
+      // Load citation data in the background (don't block on errors)
+      try {
+        const citations = await getCitationsFromGithub(projectId)
+        setCitationData({ sourceUsage: citations.sourceUsage })
+      } catch (error) {
+        // Silently fail - citation data is optional
+        console.log("Citation data not available:", error)
+        setCitationData(null)
       }
     } catch (error) {
       toast.error(t.errors.generic)
@@ -187,6 +208,9 @@ export function useSources() {
       if (savedPrefs.pageSize) {
         setPageSize(savedPrefs.pageSize as number | "all")
       }
+      if (savedPrefs.autoResizeTextarea !== undefined) {
+        setAutoResizeTextarea(savedPrefs.autoResizeTextarea)
+      }
     }
   }, [projectId])
 
@@ -205,9 +229,10 @@ export function useSources() {
         yearToFilter,
         authorFilter,
         pageSize,
+        autoResizeTextarea,
       })
     }
-  }, [projectId, columnVisibility, columnOrder, columnWidths, tagFilter, yearFromFilter, yearToFilter, authorFilter, pageSize])
+  }, [projectId, columnVisibility, columnOrder, columnWidths, tagFilter, yearFromFilter, yearToFilter, authorFilter, pageSize, autoResizeTextarea])
 
   const filteredAndSortedSources = useMemo(() => {
     let filtered = [...sources]
@@ -254,6 +279,19 @@ export function useSources() {
       filtered = filtered.filter((source) => {
         if (!source.authors) return false
         return source.authors.toLowerCase().includes(authorFilter.toLowerCase())
+      })
+    }
+
+    // Filter by citation usage (used/unused)
+    if (citationUsageFilter !== "all" && citationData) {
+      filtered = filtered.filter((source) => {
+        const isUsed = citationData.sourceUsage[source.id] !== undefined && citationData.sourceUsage[source.id] > 0
+        if (citationUsageFilter === "used") {
+          return isUsed
+        } else if (citationUsageFilter === "unused") {
+          return !isUsed
+        }
+        return true
       })
     }
 
@@ -307,7 +345,7 @@ export function useSources() {
     }
 
     return filtered
-  }, [sources, searchQuery, tagFilter, yearFromFilter, yearToFilter, authorFilter, sortColumn, sortDirection])
+  }, [sources, searchQuery, tagFilter, yearFromFilter, yearToFilter, authorFilter, citationUsageFilter, citationData, sortColumn, sortDirection])
 
   const paginatedSources = useMemo(() => {
     if (pageSize === "all") return filteredAndSortedSources
@@ -856,6 +894,27 @@ export function useSources() {
     }
   }
 
+  const handleOpenPdfExport = () => {
+    setPdfExportDialogOpen(true)
+  }
+
+  const handlePdfExport = (config: PDFExportConfig) => {
+    try {
+      downloadPDF(
+        filteredAndSortedSources,
+        config,
+        projectName,
+        projectDescription,
+        citationData
+      )
+      toast.success("PDF exported successfully")
+      setPdfExportDialogOpen(false)
+    } catch (error) {
+      toast.error("Failed to export PDF")
+      console.error(error)
+    }
+  }
+
   const handleUpdateSourceTags = async (sourceId: string, newTagIds: string[]) => {
     try {
       await updateSource(projectId, sourceId, { tagIds: newTagIds })
@@ -938,12 +997,16 @@ export function useSources() {
     setYearToFilter,
     authorFilter,
     setAuthorFilter,
+    citationUsageFilter,
+    setCitationUsageFilter,
     sortColumn,
     sortDirection,
     pageSize,
     setPageSize,
     currentPage,
     setCurrentPage,
+    autoResizeTextarea,
+    setAutoResizeTextarea,
     editingCell,
     editValue,
     setEditValue,
@@ -1025,6 +1088,12 @@ export function useSources() {
     mergeTagData,
     setMergeTagData,
     handleMergeTags,
+    pdfExportDialogOpen,
+    setPdfExportDialogOpen,
+    handleOpenPdfExport,
+    handlePdfExport,
+    projectDescription,
+    citationData,
   }
 }
 

@@ -44,6 +44,7 @@ export type SourcePreferences = {
   yearToFilter: string
   authorFilter: string
   pageSize: number | "all"
+  autoResizeTextarea?: boolean
 }
 
 export type ImportSourceData = {

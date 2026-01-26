@@ -38,6 +38,7 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
   const yearToFilter = getCookie(`${prefix}yearToFilter`)
   const authorFilter = getCookie(`${prefix}authorFilter`)
   const pageSize = getCookie(`${prefix}pageSize`)
+  const autoResizeTextarea = getCookie(`${prefix}autoResizeTextarea`)
 
   return {
     columnVisibility: columnVisibility ? JSON.parse(columnVisibility) : undefined,
@@ -48,6 +49,7 @@ export function loadPreferences(projectId: string): Partial<SourcePreferences> {
     yearToFilter: yearToFilter || undefined,
     authorFilter: authorFilter || undefined,
     pageSize: pageSize ? (pageSize === "all" ? "all" : parseInt(pageSize)) : undefined,
+    autoResizeTextarea: autoResizeTextarea ? autoResizeTextarea === "true" : undefined,
   }
 }
 
@@ -65,6 +67,7 @@ export function savePreferences(
     yearToFilter?: string
     authorFilter?: string
     pageSize?: number | "all"
+    autoResizeTextarea?: boolean
   }
 ) {
   const prefix = `sources_prefs_${projectId}_`
@@ -76,5 +79,6 @@ export function savePreferences(
   if (prefs.yearToFilter !== undefined) setCookie(`${prefix}yearToFilter`, prefs.yearToFilter)
   if (prefs.authorFilter !== undefined) setCookie(`${prefix}authorFilter`, prefs.authorFilter)
   if (prefs.pageSize !== undefined) setCookie(`${prefix}pageSize`, prefs.pageSize.toString())
+  if (prefs.autoResizeTextarea !== undefined) setCookie(`${prefix}autoResizeTextarea`, prefs.autoResizeTextarea.toString())
 }
 
