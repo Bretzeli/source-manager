@@ -173,7 +173,8 @@ function countSentences(content: string): number {
   // Process list content
   for (const list of listMatches) {
     // For lists: count \item as one sentence each (if no dot in item)
-    const itemPattern = /\\item\s*([^\\]*?)(?=\\item|\\end|$)/gs
+    // Use [\s\S] instead of . with s flag for ES2017 compatibility
+    const itemPattern = /\\item\s*([^\\]*?)(?=\\item|\\end|$)/g
     let itemMatch
     while ((itemMatch = itemPattern.exec(list.content)) !== null) {
       let itemText = itemMatch[1]

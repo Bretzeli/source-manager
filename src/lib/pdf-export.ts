@@ -254,9 +254,9 @@ export function generatePDF(
       columns.forEach((col) => {
         const value = getColumnValue(source, col, citationCount)
         const labelWidth = 25
-        const valueWidth = contentWidth - labelWidth
+        const estimatedValueWidth = contentWidth - labelWidth
         const labelHeight = config.fontSize * 1.15
-        const valueHeight = getTextHeight(doc, value || "-", valueWidth, config.fontSize)
+        const valueHeight = getTextHeight(doc, value || "-", estimatedValueWidth, config.fontSize)
         sourceHeight += Math.max(labelHeight, valueHeight) + 1.5 // Reduced spacing
       })
 
@@ -274,10 +274,16 @@ export function generatePDF(
 
       // Add source separator (except for first source)
       if (sourceIndex > 0 && !config.newSourceForEachPage) {
-        yPos += 2
-        doc.setLineWidth(0.5)
-        doc.line(margin, yPos, pageWidth - margin, yPos)
-        yPos += 2
+        // Check if we need a new page before adding separator
+        if (yPos + 5 > pageHeight - margin) {
+          doc.addPage()
+          yPos = margin
+        } else {
+          yPos += 3
+          doc.setLineWidth(0.5)
+          doc.line(margin, yPos, pageWidth - margin, yPos)
+          yPos += 3
+        }
       }
 
       // Add each column
@@ -291,10 +297,16 @@ export function generatePDF(
           : col.charAt(0).toUpperCase() + col.slice(1)
         const value = getColumnValue(source, col, citationCount)
 
-        const labelWidth = 25
-        const valueWidth = contentWidth - labelWidth
+        // Calculate label width to ensure proper spacing
+        doc.setFont(pdfFont, "bold")
+        const labelText = `${label}:`
+        const labelWidthActual = doc.getTextWidth(labelText)
+        const labelSpacing = Math.max(labelWidthActual + 3, 25) // At least 3mm spacing after label, minimum 25mm
+        
         // Skip empty fields (but show "-" for empty values)
         const displayValue = value === "-" ? "-" : (value || "-")
+        const valueStartX = margin + labelSpacing
+        const valueWidth = contentWidth - labelSpacing
         const valueLines = doc.splitTextToSize(displayValue, valueWidth)
 
         // Check if this field fits on current page, if not start new page
@@ -307,25 +319,14 @@ export function generatePDF(
           doc.addPage()
           yPos = margin
         }
-
-        // Calculate label width to ensure proper spacing
-        doc.setFont(pdfFont, "bold")
-        const labelText = `${label}:`
-        const labelWidthActual = doc.getTextWidth(labelText)
-        const labelSpacing = Math.max(labelWidthActual + 3, labelWidth) // At least 3mm spacing after label
         
         doc.text(labelText, margin, yPos)
         doc.setFont(pdfFont, "normal")
 
         // Handle multi-line values with proper page breaks
         let currentY = yPos
-        const valueStartX = margin + labelSpacing
-        const valueWidth = contentWidth - labelSpacing
         
-        // Recalculate value lines with correct width
-        const valueLinesRecalc = doc.splitTextToSize(displayValue, valueWidth)
-        
-        valueLinesRecalc.forEach((line: string, lineIndex: number) => {
+        valueLines.forEach((line: string, lineIndex: number) => {
           const lineHeight = config.fontSize * 1.15
           
           // Check if line fits on current page
