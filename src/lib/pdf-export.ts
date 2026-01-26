@@ -82,10 +82,10 @@ function sortSources(
 /**
  * Calculate text height for a given text and width
  */
-function getTextHeight(doc: jsPDF, text: string, maxWidth: number, fontSize: number): number {
-  if (!text || text.trim() === "") return fontSize * 1.15
+function getTextHeight(doc: jsPDF, text: string, maxWidth: number, fontSize: number, lineHeight: number = 1.1): number {
+  if (!text || text.trim() === "") return fontSize * lineHeight
   const lines = doc.splitTextToSize(text, maxWidth)
-  return lines.length * fontSize * 1.15 // Line height multiplier
+  return lines.length * fontSize * lineHeight // Line height multiplier
 }
 
 /**
@@ -156,23 +156,23 @@ export function generatePDF(
   if (config.includeProjectDescription && projectDescription) {
     const descLines = doc.splitTextToSize(projectDescription, contentWidth)
     doc.text(descLines, margin, yPos)
-    yPos += descLines.length * config.fontSize * 1.15 + 3
+    yPos += descLines.length * config.fontSize * lineHeight + 3
   }
 
   if (config.includeAuthor && config.authorName) {
     doc.text(`Author: ${config.authorName}`, margin, yPos)
-    yPos += config.fontSize * 1.15 + 2
+    yPos += config.fontSize * lineHeight + 2
   }
 
   if (config.includeDownloadDate) {
     const date = new Date().toLocaleDateString()
     doc.text(`Downloaded: ${date}`, margin, yPos)
-    yPos += config.fontSize * 1.15 + 2
+    yPos += config.fontSize * lineHeight + 2
   }
 
   if (config.includeSourceManagerNote) {
     doc.text("Downloaded via Source Manager", margin, yPos)
-    yPos += config.fontSize * 1.15 + 2
+    yPos += config.fontSize * lineHeight + 2
   }
 
   // Add spacing after header
@@ -180,6 +180,18 @@ export function generatePDF(
 
   // Sort sources
   const sortedSources = sortSources(sources, config, citationData)
+
+  // Line height multiplier (very tight spacing)
+  const lineHeight = 0.4
+
+  // Function to add page numbers
+  const addPageNumber = (pageNum: number) => {
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    doc.setFontSize(config.fontSize - 2)
+    doc.text(String(pageNum), pageWidth / 2, pageHeight - 10, { align: "center" })
+    doc.setFontSize(config.fontSize)
+  }
 
   // Get column headers
   const columns: string[] = []
@@ -224,7 +236,7 @@ export function generatePDF(
       let maxRowHeight = 0
       columns.forEach((col) => {
         const value = getColumnValue(source, col, citationCount)
-        const cellHeight = getTextHeight(doc, value || "-", columnWidth - 2, config.fontSize)
+        const cellHeight = getTextHeight(doc, value || "-", columnWidth - 2, config.fontSize, lineHeight)
         maxRowHeight = Math.max(maxRowHeight, cellHeight)
       })
 
@@ -249,24 +261,40 @@ export function generatePDF(
       // Calculate total height needed for this source
       let sourceHeight = 0
       if (sourceIndex > 0 && !config.newSourceForEachPage) {
-        sourceHeight += 3 // Separator spacing
+        sourceHeight += 9 // Separator spacing (4mm before + 5mm after)
       }
       columns.forEach((col) => {
         const value = getColumnValue(source, col, citationCount)
         const labelWidth = 25
         const estimatedValueWidth = contentWidth - labelWidth
-        const labelHeight = config.fontSize * 1.15
-        const valueHeight = getTextHeight(doc, value || "-", estimatedValueWidth, config.fontSize)
-        sourceHeight += Math.max(labelHeight, valueHeight) + 1.5 // Reduced spacing
+        const labelHeight = config.fontSize * lineHeight
+        const valueHeight = getTextHeight(doc, value || "-", estimatedValueWidth, config.fontSize, lineHeight)
+        sourceHeight += Math.max(labelHeight, valueHeight) + 0.8 // Reduced spacing
       })
 
       // Check if we need a new page
       if (config.newSourceForEachPage && sourceIndex > 0) {
         doc.addPage()
         yPos = margin
+      } else if (config.noPageOverlap) {
+        // If no page overlap is enabled, check if source fits on current page
+        if (sourceIndex === 0) {
+          // First source: only start new page if it definitely doesn't fit
+          if (yPos + sourceHeight > pageHeight - margin - 10) {
+            doc.addPage()
+            yPos = margin
+          }
+        } else {
+          // Other sources: check if source fits on current page
+          if (yPos + sourceHeight > pageHeight - margin) {
+            doc.addPage()
+            yPos = margin
+          }
+        }
       } else {
-        // Check if source fits on current page
-        if (yPos + sourceHeight > pageHeight - margin) {
+        // If no page overlap is disabled, just continue on current page
+        // Only add new page if we're past the page boundary
+        if (yPos > pageHeight - margin) {
           doc.addPage()
           yPos = margin
         }
@@ -275,14 +303,14 @@ export function generatePDF(
       // Add source separator (except for first source)
       if (sourceIndex > 0 && !config.newSourceForEachPage) {
         // Check if we need a new page before adding separator
-        if (yPos + 5 > pageHeight - margin) {
+        if (yPos + 8 > pageHeight - margin) {
           doc.addPage()
           yPos = margin
         } else {
-          yPos += 3
+          yPos += 4
           doc.setLineWidth(0.5)
           doc.line(margin, yPos, pageWidth - margin, yPos)
-          yPos += 3
+          yPos += 5 // More space after separator
         }
       }
 
@@ -311,8 +339,8 @@ export function generatePDF(
 
         // Check if this field fits on current page, if not start new page
         const fieldHeight = Math.max(
-          config.fontSize * 1.15,
-          valueLines.length * config.fontSize * 1.15
+          config.fontSize * lineHeight,
+          valueLines.length * config.fontSize * lineHeight
         )
         
         if (yPos + fieldHeight > pageHeight - margin) {
@@ -325,12 +353,11 @@ export function generatePDF(
 
         // Handle multi-line values with proper page breaks
         let currentY = yPos
+        const lineHeightPx = config.fontSize * lineHeight
         
         valueLines.forEach((line: string, lineIndex: number) => {
-          const lineHeight = config.fontSize * 1.15
-          
           // Check if line fits on current page
-          if (currentY + lineHeight > pageHeight - margin) {
+          if (currentY + lineHeightPx > pageHeight - margin) {
             doc.addPage()
             currentY = margin
             // Redraw label on new page if this is the first line
@@ -342,12 +369,19 @@ export function generatePDF(
           }
           
           doc.text(line, valueStartX, currentY)
-          currentY += lineHeight
+          currentY += lineHeightPx
         })
         
-        yPos = currentY + 1.5 // Reduced spacing between fields
+        yPos = currentY + 0.8 // Reduced spacing between fields
       })
     })
+  }
+
+  // Add page numbers to all pages
+  const totalPages = doc.internal.pages.length - 1 // jsPDF counts from 1, but array is 0-indexed
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i)
+    addPageNumber(i)
   }
 
   return doc
