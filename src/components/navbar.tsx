@@ -34,6 +34,7 @@ import { useSession, signOut } from "@/lib/auth-client"
 import { useAuthModal } from "@/contexts/auth-modal-context"
 import { getProject } from "@/app/actions/projects"
 import { useEffect, useState } from "react"
+import { useProjectContext } from "@/contexts/project-context"
 
 interface NavbarProps {
   projectId?: string
@@ -46,6 +47,7 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
   const { t, locale, setLocale } = useTranslations()
   const { data: session } = useSession()
   const { openModal } = useAuthModal()
+  const { projectId: contextProjectId, projectName: contextProjectName } = useProjectContext()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -54,12 +56,20 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
 
   // Extract project ID from pathname if not provided
   const pathProjectId = pathname?.match(/\/projects\/([^\/]+)/)?.[1]
-  const currentProjectId = projectId || pathProjectId
+  const currentProjectId = projectId || contextProjectId || pathProjectId
   const [fetchedProjectName, setFetchedProjectName] = useState<string | undefined>(projectName)
 
   // Fetch project name if we have a project ID but no name
   useEffect(() => {
-    if (currentProjectId && !projectName && session?.user) {
+    if (projectName) {
+      setFetchedProjectName(projectName)
+      return
+    }
+    if (contextProjectId === currentProjectId && contextProjectName) {
+      setFetchedProjectName(contextProjectName)
+      return
+    }
+    if (currentProjectId && session?.user) {
       getProject(currentProjectId).then((project) => {
         if (project) {
           setFetchedProjectName(project.title)
@@ -68,9 +78,9 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
     } else if (!currentProjectId) {
       setFetchedProjectName(undefined)
     }
-  }, [currentProjectId, projectName, session?.user])
+  }, [currentProjectId, projectName, session?.user, contextProjectId, contextProjectName])
 
-  const currentProjectName = projectName || fetchedProjectName
+  const currentProjectName = projectName || (contextProjectId === currentProjectId ? contextProjectName : undefined) || fetchedProjectName
   const isProjectPage = currentProjectId !== undefined
   const isAuthenticated = !!session?.user
 

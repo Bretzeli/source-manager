@@ -31,94 +31,70 @@ function parseGithubUrl(url: string): { owner: string; repo: string } | null {
   }
 }
 
-/**
- * Fetch file content from GitHub
- */
-async function fetchFileContent(
-  repoUrl: string,
-  filePath: string,
-  projectId: string
-): Promise<string> {
-  const parsed = parseGithubUrl(repoUrl)
-  
-  if (!parsed) {
-    throw new Error("Invalid GitHub repository URL")
+function buildGithubHeaders(accessToken: string | null): HeadersInit {
+  return {
+    Accept: "application/vnd.github.v3+json",
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
   }
-  
-  const { owner, repo } = parsed
-  
-  // Get installation access token if available
-  let accessToken: string | null = null
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (session?.user) {
-    const [project] = await db
-      .select()
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .limit(1)
-    
-    if (project && project.ownerId === session.user.id && project.githubAccountId) {
-      const [githubAccount] = await db
-        .select()
-        .from(githubAccounts)
-        .where(eq(githubAccounts.id, project.githubAccountId))
-        .limit(1)
-      
-      if (githubAccount) {
-        try {
-          const appId = process.env.GITHUB_APP_ID
-          const privateKey = process.env.GITHUB_APP_PRIVATE_KEY
-          
-          if (appId && privateKey) {
-            accessToken = await getInstallationToken(appId, privateKey, githubAccount.installationId)
-          }
-        } catch (error) {
-          console.error("Failed to get installation token:", error)
-        }
-      }
-    }
-  }
-  
-  // Get default branch first
-  const repoResponse = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}`,
-    {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-    }
-  )
-  
+}
+
+async function fetchDefaultBranch(owner: string, repo: string, accessToken: string | null): Promise<string> {
+  const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: buildGithubHeaders(accessToken),
+  })
+
   if (!repoResponse.ok) {
     throw new Error(`Failed to fetch repository: ${repoResponse.statusText}`)
   }
-  
+
   const repoData = await repoResponse.json()
-  const defaultBranch = repoData.default_branch
-  
-  // Fetch file content
+  return repoData.default_branch
+}
+
+async function fetchFileContent(
+  owner: string,
+  repo: string,
+  filePath: string,
+  defaultBranch: string,
+  accessToken: string | null
+): Promise<string> {
   const fileResponse = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(filePath)}?ref=${defaultBranch}`,
-    {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-    }
+    { headers: buildGithubHeaders(accessToken) }
   )
-  
+
   if (!fileResponse.ok) {
     throw new Error(`Failed to fetch file: ${fileResponse.statusText}`)
   }
-  
+
   const fileData = await fileResponse.json()
-  
+
   if (fileData.encoding === "base64") {
     return Buffer.from(fileData.content, "base64").toString("utf-8")
   }
-  
+
   return fileData.content || ""
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let index = 0
+
+  async function worker() {
+    while (true) {
+      const currentIndex = index++
+      if (currentIndex >= items.length) return
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex)
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, items.length))
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
 }
 
 /**
@@ -407,52 +383,77 @@ export async function getCitationsFromGithub(projectId: string) {
     throw new Error("Project not found or unauthorized")
   }
   
-  // Get all sources for this project with tags (needed even if no repo configured)
-  const allSources = await db
-    .select()
-    .from(sources)
-    .where(eq(sources.projectId, projectId))
-    .orderBy(asc(sources.abbreviation))
-  
-  // Get tags for each source
-  const projectSources = await Promise.all(
-    allSources.map(async (source) => {
-      const sourceTagRelations = await db
-        .select({
-          tagId: sourceTags.tagId,
-        })
-        .from(sourceTags)
-        .where(eq(sourceTags.sourceId, source.id))
-
-      const tagIds = sourceTagRelations.map((st) => st.tagId)
-      
-      let sourceTagsData: Array<{
-        id: string
-        abbreviation: string | null
-        name: string
-        color: string
-      }> = []
-
-      if (tagIds.length > 0) {
-        const tagsData = await db
-          .select({
-            id: tags.id,
-            abbreviation: tags.abbreviation,
-            name: tags.name,
-            color: tags.color,
-          })
-          .from(tags)
-          .where(inArray(tags.id, tagIds))
-
-        sourceTagsData = tagsData
-      }
-
-      return {
-        ...source,
-        tags: sourceTagsData,
-      }
+  // Get all sources for this project with tags in one batched query.
+  const sourceRows = await db
+    .select({
+      sourceId: sources.id,
+      sourceProjectId: sources.projectId,
+      sourceAbbreviation: sources.abbreviation,
+      sourceTitle: sources.title,
+      sourceDescription: sources.description,
+      sourceAuthors: sources.authors,
+      sourcePublicationDate: sources.publicationDate,
+      sourceNotes: sources.notes,
+      sourceLinks: sources.links,
+      sourceBibtex: sources.bibtex,
+      tagId: tags.id,
+      tagAbbreviation: tags.abbreviation,
+      tagName: tags.name,
+      tagColor: tags.color,
     })
-  )
+    .from(sources)
+    .leftJoin(sourceTags, eq(sourceTags.sourceId, sources.id))
+    .leftJoin(tags, eq(tags.id, sourceTags.tagId))
+    .where(eq(sources.projectId, projectId))
+    .orderBy(asc(sources.abbreviation), asc(tags.name))
+
+  const projectSourceMap = new Map<string, {
+    id: string
+    projectId: string
+    abbreviation: string | null
+    title: string
+    description: string | null
+    authors: string | null
+    publicationDate: string | null
+    notes: string | null
+    links: string | null
+    bibtex: string | null
+    tags: Array<{
+      id: string
+      abbreviation: string | null
+      name: string
+      color: string
+    }>
+  }>()
+
+  for (const row of sourceRows) {
+    if (!projectSourceMap.has(row.sourceId)) {
+      projectSourceMap.set(row.sourceId, {
+        id: row.sourceId,
+        projectId: row.sourceProjectId,
+        abbreviation: row.sourceAbbreviation,
+        title: row.sourceTitle,
+        description: row.sourceDescription,
+        authors: row.sourceAuthors,
+        publicationDate: row.sourcePublicationDate,
+        notes: row.sourceNotes,
+        links: row.sourceLinks,
+        bibtex: row.sourceBibtex,
+        tags: [],
+      })
+    }
+
+    if (row.tagId) {
+      projectSourceMap.get(row.sourceId)!.tags.push({
+        id: row.tagId,
+        abbreviation: row.tagAbbreviation,
+        name: row.tagName!,
+        color: row.tagColor!,
+      })
+    }
+  }
+
+  const projectSources = Array.from(projectSourceMap.values())
 
   if (!project.githubRepoUrl || !project.githubRepoFiles) {
     return {
@@ -471,6 +472,33 @@ export async function getCitationsFromGithub(projectId: string) {
   }
   
   const selectedFiles: string[] = JSON.parse(project.githubRepoFiles)
+  const parsedRepo = parseGithubUrl(project.githubRepoUrl)
+  if (!parsedRepo) {
+    throw new Error("Invalid GitHub repository URL")
+  }
+
+  let accessToken: string | null = null
+  if (project.githubAccountId) {
+    const [githubAccount] = await db
+      .select()
+      .from(githubAccounts)
+      .where(eq(githubAccounts.id, project.githubAccountId))
+      .limit(1)
+
+    if (githubAccount) {
+      try {
+        const appId = process.env.GITHUB_APP_ID
+        const privateKey = process.env.GITHUB_APP_PRIVATE_KEY
+        if (appId && privateKey) {
+          accessToken = await getInstallationToken(appId, privateKey, githubAccount.installationId)
+        }
+      } catch (error) {
+        console.error("Failed to get installation token:", error)
+      }
+    }
+  }
+
+  const defaultBranch = await fetchDefaultBranch(parsedRepo.owner, parsedRepo.repo, accessToken)
   const allCitations: string[] = []
   let totalUniqueCitationCommands = 0
   let totalSentences = 0
@@ -484,53 +512,41 @@ export async function getCitationsFromGithub(projectId: string) {
     filePath: string
   }> = []
   
-  // Fetch and parse each file
-  for (const filePath of selectedFiles) {
-    if (!filePath.endsWith(".tex")) {
-      continue // Only process LaTeX files
-    }
-    
+  const texFiles = selectedFiles.filter((filePath) => filePath.endsWith(".tex"))
+  const fileResults = await mapWithConcurrency(texFiles, 4, async (filePath) => {
     try {
-      const content = await fetchFileContent(project.githubRepoUrl, filePath, projectId)
+      const content = await fetchFileContent(parsedRepo.owner, parsedRepo.repo, filePath, defaultBranch, accessToken)
       const { citations, uniqueCitationCommands } = parseLatexCitations(content)
-      allCitations.push(...citations)
-      totalUniqueCitationCommands += uniqueCitationCommands
-      
-      // Count sentences
       const sentences = countSentences(content)
-      totalSentences += sentences
-      
-      // Parse document structure
       const structure = parseDocumentStructure(content)
-      
-      // Verify that top-level sections sum to match total file citations
-      // (This helps catch any parsing inconsistencies)
-      const topLevelSections = structure.filter(s => {
-        // Find the minimum level in the structure
-        const minLevel = Math.min(...structure.map(sec => sec.level))
+
+      const topLevelSections = structure.filter((s) => {
+        const minLevel = Math.min(...structure.map((sec) => sec.level))
         return s.level === minLevel
       })
-      
-      // Sum citations from top-level sections only
       const topLevelTotalCitations = topLevelSections.reduce((sum, sec) => sum + sec.citations.length, 0)
-      const topLevelTotalUnique = topLevelSections.reduce((sum, sec) => sum + sec.uniqueCitationCommands, 0)
-      
-      // If there's a significant discrepancy, log it (but don't fail)
       const fileTotalCitations = citations.length
-      const fileTotalUnique = uniqueCitationCommands
       if (Math.abs(topLevelTotalCitations - fileTotalCitations) > 5) {
         console.warn(`Citation count mismatch in ${filePath}: file has ${fileTotalCitations} citations, top-level sections sum to ${topLevelTotalCitations}`)
       }
-      
-      for (const section of structure) {
-        documentStructure.push({
-          ...section,
-          filePath,
-        })
-      }
+
+      return { filePath, citations, uniqueCitationCommands, sentences, structure }
     } catch (error) {
       console.error(`Failed to fetch file ${filePath}:`, error)
-      // Continue with other files
+      return null
+    }
+  })
+
+  for (const result of fileResults) {
+    if (!result) continue
+    allCitations.push(...result.citations)
+    totalUniqueCitationCommands += result.uniqueCitationCommands
+    totalSentences += result.sentences
+    for (const section of result.structure) {
+      documentStructure.push({
+        ...section,
+        filePath: result.filePath,
+      })
     }
   }
   

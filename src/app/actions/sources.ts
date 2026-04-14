@@ -63,53 +63,76 @@ export async function getSources(projectId: string) {
     return []
   }
 
-  const allSources = await db
-    .select()
-    .from(sources)
-    .where(eq(sources.projectId, projectId))
-    .orderBy(asc(sources.abbreviation))
-
-  // Get tags for each source
-  const sourcesWithTags = await Promise.all(
-    allSources.map(async (source) => {
-      const sourceTagRelations = await db
-        .select({
-          tagId: sourceTags.tagId,
-        })
-        .from(sourceTags)
-        .where(eq(sourceTags.sourceId, source.id))
-
-      const tagIds = sourceTagRelations.map((st) => st.tagId)
-      
-      let sourceTagsData: Array<{
-        id: string
-        abbreviation: string | null
-        name: string
-        color: string
-      }> = []
-
-      if (tagIds.length > 0) {
-        const tagsData = await db
-          .select({
-            id: tags.id,
-            abbreviation: tags.abbreviation,
-            name: tags.name,
-            color: tags.color,
-          })
-          .from(tags)
-          .where(inArray(tags.id, tagIds))
-
-        sourceTagsData = tagsData
-      }
-
-      return {
-        ...source,
-        tags: sourceTagsData,
-      }
+  const rows = await db
+    .select({
+      sourceId: sources.id,
+      sourceProjectId: sources.projectId,
+      sourceAbbreviation: sources.abbreviation,
+      sourceTitle: sources.title,
+      sourceDescription: sources.description,
+      sourceAuthors: sources.authors,
+      sourcePublicationDate: sources.publicationDate,
+      sourceNotes: sources.notes,
+      sourceLinks: sources.links,
+      sourceBibtex: sources.bibtex,
+      tagId: tags.id,
+      tagAbbreviation: tags.abbreviation,
+      tagName: tags.name,
+      tagColor: tags.color,
     })
-  )
+    .from(sources)
+    .leftJoin(sourceTags, eq(sourceTags.sourceId, sources.id))
+    .leftJoin(tags, eq(tags.id, sourceTags.tagId))
+    .where(eq(sources.projectId, projectId))
+    .orderBy(asc(sources.abbreviation), asc(tags.name))
 
-  return sourcesWithTags
+  const sourceMap = new Map<string, {
+    id: string
+    projectId: string
+    abbreviation: string | null
+    title: string
+    description: string | null
+    authors: string | null
+    publicationDate: string | null
+    notes: string | null
+    links: string | null
+    bibtex: string | null
+    tags: Array<{
+      id: string
+      abbreviation: string | null
+      name: string
+      color: string
+    }>
+  }>()
+
+  for (const row of rows) {
+    if (!sourceMap.has(row.sourceId)) {
+      sourceMap.set(row.sourceId, {
+        id: row.sourceId,
+        projectId: row.sourceProjectId,
+        abbreviation: row.sourceAbbreviation,
+        title: row.sourceTitle,
+        description: row.sourceDescription,
+        authors: row.sourceAuthors,
+        publicationDate: row.sourcePublicationDate,
+        notes: row.sourceNotes,
+        links: row.sourceLinks,
+        bibtex: row.sourceBibtex,
+        tags: [],
+      })
+    }
+
+    if (row.tagId) {
+      sourceMap.get(row.sourceId)!.tags.push({
+        id: row.tagId,
+        abbreviation: row.tagAbbreviation,
+        name: row.tagName!,
+        color: row.tagColor!,
+      })
+    }
+  }
+
+  return Array.from(sourceMap.values())
 }
 
 export async function getTags(projectId: string) {

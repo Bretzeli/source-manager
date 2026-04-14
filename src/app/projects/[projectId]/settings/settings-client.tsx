@@ -2,6 +2,7 @@
 
 import { useTranslations } from "@/lib/i18n"
 import { GithubRepoSettings } from "@/components/github-repo-settings"
+import { ProjectNavbarSync } from "@/components/project-navbar-sync"
 
 interface SettingsPageClientProps {
   projectId: string
@@ -24,6 +25,7 @@ export function SettingsPageClient({
   if (!t.settings) {
     return (
       <div className="container mx-auto px-4 py-8">
+        <ProjectNavbarSync projectId={projectId} projectName={projectTitle} />
         <div className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
           <p className="text-muted-foreground mt-1">
@@ -39,6 +41,7 @@ export function SettingsPageClient({
 
   return (
     <div className="container mx-auto px-4 py-8">
+      <ProjectNavbarSync projectId={projectId} projectName={projectTitle} />
       <div className="mb-8">
         <h1 className="text-3xl font-semibold tracking-tight">{t.settings.title}</h1>
         <p className="text-muted-foreground mt-1">

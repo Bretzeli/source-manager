@@ -14,6 +14,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, FileText } from "lucide-react"
 import type { Source, Tag } from "@/types/sources"
+import { ProjectNavbarSync } from "@/components/project-navbar-sync"
 
 type CitationData = {
   citations: string[]
@@ -155,6 +156,7 @@ export default function CitationsPage() {
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-8">
+        <ProjectNavbarSync projectId={projectId} projectName={projectName} />
         <div className="flex items-center justify-center min-h-[400px]">
           <Spinner className="h-8 w-8" />
         </div>
@@ -165,6 +167,7 @@ export default function CitationsPage() {
   if (error) {
     return (
       <div className="container mx-auto px-4 py-8">
+        <ProjectNavbarSync projectId={projectId} projectName={projectName} />
         <div className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight">Citations</h1>
           <p className="text-muted-foreground mt-1">
@@ -182,6 +185,7 @@ export default function CitationsPage() {
   if (!citationData) {
     return (
       <div className="container mx-auto px-4 py-8">
+        <ProjectNavbarSync projectId={projectId} projectName={projectName} />
         <div className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight">Citations</h1>
           <p className="text-muted-foreground mt-1">
@@ -214,6 +218,7 @@ export default function CitationsPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      <ProjectNavbarSync projectId={projectId} projectName={projectName} />
       <div className="mb-8">
         <h1 className="text-3xl font-semibold tracking-tight">Citations</h1>
         <p className="text-muted-foreground mt-1">

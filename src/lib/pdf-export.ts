@@ -142,6 +142,8 @@ export function generatePDF(
   const margin = 20
   const contentWidth = pageWidth - 2 * margin
   let yPos = margin
+  // Line height multiplier (very tight spacing)
+  const lineHeight = 0.4
 
   // Add header information
   if (config.includeProjectTitle) {
@@ -180,9 +182,6 @@ export function generatePDF(
 
   // Sort sources
   const sortedSources = sortSources(sources, config, citationData)
-
-  // Line height multiplier (very tight spacing)
-  const lineHeight = 0.4
 
   // Function to add page numbers
   const addPageNumber = (pageNum: number) => {

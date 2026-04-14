@@ -2,7 +2,7 @@
  * Custom hook for sources page business logic
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams } from "next/navigation"
 import { toast } from "sonner"
 import { useTranslations } from "@/lib/i18n"
@@ -16,6 +16,11 @@ import { downloadPDF } from "@/lib/pdf-export"
 import type { PDFExportConfig } from "@/components/pdf-export-dialog"
 import type { Source, Tag, ColumnKey, ImportSourceData } from "@/types/sources"
 import { COLUMN_ORDER } from "@/types/sources"
+
+type CreateTagContext =
+  | { mode: "none" }
+  | { mode: "new-source" }
+  | { mode: "existing-source"; sourceId: string }
 
 export function useSources() {
   const params = useParams()
@@ -92,7 +97,9 @@ export function useSources() {
     tagIds: [] as string[],
   })
   const [creating, setCreating] = useState(false)
+  const [creatingTag, setCreatingTag] = useState(false)
   const [createTagDialogOpen, setCreateTagDialogOpen] = useState(false)
+  const [createTagContext, setCreateTagContext] = useState<CreateTagContext>({ mode: "none" })
   const [newTag, setNewTag] = useState({
     name: "",
     abbreviation: "",
@@ -148,8 +155,10 @@ export function useSources() {
   })
 
   const [pdfExportDialogOpen, setPdfExportDialogOpen] = useState(false)
+  const loadRequestIdRef = useRef(0)
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current
     try {
       setLoading(true)
       const [sourcesData, tagsData, projectData] = await Promise.all([
@@ -157,28 +166,34 @@ export function useSources() {
         getTags(projectId),
         getProject(projectId),
       ])
+      if (requestId !== loadRequestIdRef.current) return
       setSources(sourcesData as Source[])
       setTags(tagsData as Tag[])
       if (projectData) {
         setProjectName(projectData.title)
         setProjectDescription(projectData.description)
       }
-      
-      // Load citation data in the background (don't block on errors)
-      try {
-        const citations = await getCitationsFromGithub(projectId)
-        setCitationData({ sourceUsage: citations.sourceUsage })
-      } catch (error) {
-        // Silently fail - citation data is optional
-        console.log("Citation data not available:", error)
-        setCitationData(null)
-      }
     } catch (error) {
+      if (requestId !== loadRequestIdRef.current) return
       toast.error(t.errors.generic)
       console.error(error)
     } finally {
+      if (requestId !== loadRequestIdRef.current) return
       setLoading(false)
     }
+
+    // Citation loading is intentionally non-blocking for initial table render.
+    void getCitationsFromGithub(projectId)
+      .then((citations) => {
+        if (requestId !== loadRequestIdRef.current) return
+        setCitationData({ sourceUsage: citations.sourceUsage })
+      })
+      .catch((error) => {
+        if (requestId !== loadRequestIdRef.current) return
+        // Silently fail - citation data is optional
+        console.log("Citation data not available:", error)
+        setCitationData(null)
+      })
   }, [projectId, t.errors.generic])
 
   useEffect(() => {
@@ -219,6 +234,12 @@ export function useSources() {
   }, [loadData])
 
   useEffect(() => {
+    return () => {
+      loadRequestIdRef.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
     if (typeof window !== "undefined") {
       savePreferences(projectId, {
         columnVisibility,
@@ -234,22 +255,57 @@ export function useSources() {
     }
   }, [projectId, columnVisibility, columnOrder, columnWidths, tagFilter, yearFromFilter, yearToFilter, authorFilter, pageSize, autoResizeTextarea])
 
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 200)
+    return () => clearTimeout(timeout)
+  }, [searchQuery])
+
+  const normalizedSearchIndex = useMemo(() => {
+    return sources.map((source) => ({
+      source,
+      abbreviation: source.abbreviation?.toLowerCase() || "",
+      title: source.title?.toLowerCase() || "",
+      authors: source.authors?.toLowerCase() || "",
+      description: source.description?.toLowerCase() || "",
+      notes: source.notes?.toLowerCase() || "",
+      links: source.links?.toLowerCase() || "",
+      bibtex: source.bibtex?.toLowerCase() || "",
+      tagNames: source.tags.map((t) => t.name.toLowerCase()),
+    }))
+  }, [sources])
+
   const filteredAndSortedSources = useMemo(() => {
     let filtered = [...sources]
 
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
+    if (debouncedSearchQuery) {
+      const query = debouncedSearchQuery.toLowerCase()
+      filtered = normalizedSearchIndex
+        .filter((entry) => {
+          return (
+            entry.abbreviation.includes(query) ||
+            entry.title.includes(query) ||
+            entry.authors.includes(query) ||
+            entry.description.includes(query) ||
+            entry.notes.includes(query) ||
+            entry.links.includes(query) ||
+            entry.bibtex.includes(query) ||
+            entry.tagNames.some((tagName) => tagName.includes(query))
+          )
+        })
+        .map((entry) => entry.source)
+    } else {
+      filtered = [...sources]
+    }
+
+    if (authorFilter !== "all") {
+      const authorNeedle = authorFilter.toLowerCase()
       filtered = filtered.filter((source) => {
-        return (
-          source.abbreviation?.toLowerCase().includes(query) ||
-          source.title?.toLowerCase().includes(query) ||
-          source.authors?.toLowerCase().includes(query) ||
-          source.description?.toLowerCase().includes(query) ||
-          source.notes?.toLowerCase().includes(query) ||
-          source.links?.toLowerCase().includes(query) ||
-          source.bibtex?.toLowerCase().includes(query) ||
-          source.tags.some((t) => t.name.toLowerCase().includes(query))
-        )
+        if (!source.authors) return false
+        return source.authors.toLowerCase().includes(authorNeedle)
       })
     }
 
@@ -272,13 +328,6 @@ export function useSources() {
           return year <= toYear
         }
         return true
-      })
-    }
-
-    if (authorFilter !== "all") {
-      filtered = filtered.filter((source) => {
-        if (!source.authors) return false
-        return source.authors.toLowerCase().includes(authorFilter.toLowerCase())
       })
     }
 
@@ -345,7 +394,7 @@ export function useSources() {
     }
 
     return filtered
-  }, [sources, searchQuery, tagFilter, yearFromFilter, yearToFilter, authorFilter, citationUsageFilter, citationData, sortColumn, sortDirection])
+  }, [sources, debouncedSearchQuery, normalizedSearchIndex, tagFilter, yearFromFilter, yearToFilter, authorFilter, citationUsageFilter, citationData, sortColumn, sortDirection])
 
   const paginatedSources = useMemo(() => {
     if (pageSize === "all") return filteredAndSortedSources
@@ -646,20 +695,61 @@ export function useSources() {
 
   const handleCreateTag = async () => {
     try {
+      setCreatingTag(true)
       const tag = await createTag(projectId, {
         abbreviation: newTag.abbreviation || null,
         name: newTag.name,
         color: newTag.color,
-      })
-      setTags([...tags, tag as Tag])
+      }) as Tag
+
+      setTags((prev) => [...prev, tag])
+
+      if (createTagContext.mode === "new-source") {
+        setNewSource((prev) => ({
+          ...prev,
+          tagIds: prev.tagIds.includes(tag.id) ? prev.tagIds : [...prev.tagIds, tag.id],
+        }))
+      } else if (createTagContext.mode === "existing-source") {
+        const targetSource = sources.find((s) => s.id === createTagContext.sourceId)
+        if (targetSource) {
+          const currentTagIds = targetSource.tags.map((t) => t.id)
+          const newTagIds = currentTagIds.includes(tag.id) ? currentTagIds : [...currentTagIds, tag.id]
+
+          await updateSource(projectId, createTagContext.sourceId, { tagIds: newTagIds })
+
+          setSources((prevSources) =>
+            prevSources.map((s) => {
+              if (s.id !== createTagContext.sourceId) return s
+              if (s.tags.some((t) => t.id === tag.id)) return s
+              return {
+                ...s,
+                tags: [...s.tags, tag],
+              }
+            })
+          )
+        }
+      }
+
       setCreateTagDialogOpen(false)
+      setCreateTagContext({ mode: "none" })
       setNewTag({ name: "", abbreviation: "", color: "#3b82f6" })
       setCustomColor(false)
       toast.success("Tag created successfully")
-      await loadData()
     } catch (error) {
       toast.error(t.errors.generic)
+    } finally {
+      setCreatingTag(false)
     }
+  }
+
+  const openCreateTagDialog = (context: CreateTagContext = { mode: "none" }) => {
+    setCreateTagContext(context)
+    setCreateTagDialogOpen(true)
+  }
+
+  const closeCreateTagDialog = () => {
+    setCreateTagDialogOpen(false)
+    setCreateTagContext({ mode: "none" })
   }
 
   const handleUpdateTag = async () => {
@@ -1013,8 +1103,11 @@ export function useSources() {
     newSource,
     setNewSource,
     creating,
+    creatingTag,
     createTagDialogOpen,
     setCreateTagDialogOpen,
+    openCreateTagDialog,
+    closeCreateTagDialog,
     newTag,
     setNewTag,
     customColor,

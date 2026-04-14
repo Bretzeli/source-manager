@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import { useParams } from "next/navigation"
 import { useTranslations } from "@/lib/i18n"
 import { parseBibtex, bibtexToSourceFields } from "@/lib/bibtex"
 import { useSources } from "@/hooks/use-sources"
@@ -58,9 +59,12 @@ import { PDFExportDialog } from "@/components/pdf-export-dialog"
 import { PREDEFINED_COLORS } from "./constants"
 import { renderLinks } from "./utils/render-links"
 import { ColumnSettingsContent } from "./components/ColumnSettingsContent"
+import { ProjectNavbarSync } from "@/components/project-navbar-sync"
 
 export default function SourcesPage() {
   const { t } = useTranslations()
+  const params = useParams()
+  const projectId = params.projectId as string
   const {
     sources,
     tags,
@@ -116,8 +120,11 @@ export default function SourcesPage() {
     newSource,
     setNewSource,
     creating,
+    creatingTag,
     createTagDialogOpen,
     setCreateTagDialogOpen,
+    openCreateTagDialog,
+    closeCreateTagDialog,
     newTag,
     setNewTag,
     customColor,
@@ -305,6 +312,7 @@ export default function SourcesPage() {
 
   return (
     <div className={`${fullScreen ? "px-0" : "container mx-auto px-4"} py-8`}>
+      <ProjectNavbarSync projectId={projectId} projectName={projectName} />
       {!fullScreen && (
         <div className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight">{t.sources.title}</h1>
@@ -722,7 +730,7 @@ export default function SourcesPage() {
                                     </div>
                                   </Button>
                                 </PopoverTrigger>
-                                <PopoverContent className="w-80">
+                                <PopoverContent className="w-80" onWheelCapture={(event) => event.stopPropagation()}>
                                   <div className="space-y-4">
                                     <Label>{t.sources.addDialog.tags}</Label>
                                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
@@ -753,7 +761,7 @@ export default function SourcesPage() {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => setCreateTagDialogOpen(true)}
+                                      onClick={() => openCreateTagDialog({ mode: "existing-source", sourceId: source.id })}
                                     >
                                       <Plus className="mr-2 h-4 w-4" />
                                       {t.sources.addDialog.createTag}
@@ -964,7 +972,7 @@ export default function SourcesPage() {
                       : `${newSource.tagIds.length} tag(s) selected`}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-80">
+                <PopoverContent className="w-80" onWheelCapture={(event) => event.stopPropagation()}>
                   <div className="space-y-4">
                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
                       {tags.map((tag) => (
@@ -994,7 +1002,7 @@ export default function SourcesPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCreateTagDialogOpen(true)}
+                      onClick={() => openCreateTagDialog({ mode: "new-source" })}
                     >
                       <Plus className="mr-2 h-4 w-4" />
                       {t.sources.addDialog.createTag}
@@ -1067,7 +1075,16 @@ export default function SourcesPage() {
       </Dialog>
 
       {/* Create Tag Dialog */}
-      <Dialog open={createTagDialogOpen} onOpenChange={setCreateTagDialogOpen}>
+      <Dialog
+        open={createTagDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setCreateTagDialogOpen(true)
+          } else {
+            closeCreateTagDialog()
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t.sources.addDialog.createTag}</DialogTitle>
@@ -1151,17 +1168,24 @@ export default function SourcesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => {
-              setCreateTagDialogOpen(false)
+              closeCreateTagDialog()
               setNewTag({ name: "", abbreviation: "", color: "#3b82f6" })
               setCustomColor(false)
-            }}>
+            }} disabled={creatingTag}>
               {t.home.cancel}
             </Button>
             <Button
               onClick={handleCreateTag}
-              disabled={!newTag.name}
+              disabled={creatingTag || !newTag.name}
             >
-              {t.sources.addDialog.create}
+              {creatingTag ? (
+                <>
+                  <Spinner className="mr-2 h-4 w-4" />
+                  {t.sources.addDialog.creating}
+                </>
+              ) : (
+                t.sources.addDialog.create
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2057,7 +2081,7 @@ export default function SourcesPage() {
                   onClick={() => {
                     setEditingTag(null)
                     setEditingTagData({ name: "", abbreviation: "", color: "#3b82f6" })
-                    setCreateTagDialogOpen(true)
+                    openCreateTagDialog()
                   }}
                 >
                   <Plus className="mr-2 h-4 w-4" />
