@@ -55,18 +55,9 @@ import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Sea
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ColumnKey, Source } from "@/types/sources"
 import { PDFExportDialog } from "@/components/pdf-export-dialog"
-
-const PREDEFINED_COLORS = [
-  { name: "Blue", value: "#3b82f6" },
-  { name: "Green", value: "#10b981" },
-  { name: "Dark Green", value: "#047857" },
-  { name: "Red", value: "#ef4444" },
-  { name: "Orange", value: "#f97316" },
-  { name: "Yellow", value: "#eab308" },
-  { name: "Purple", value: "#a855f7" },
-  { name: "Pink", value: "#ec4899" },
-  { name: "Brown", value: "#92400e" },
-]
+import { PREDEFINED_COLORS } from "./constants"
+import { renderLinks } from "./utils/render-links"
+import { ColumnSettingsContent } from "./components/ColumnSettingsContent"
 
 export default function SourcesPage() {
   const { t } = useTranslations()
@@ -302,73 +293,6 @@ export default function SourcesPage() {
     handleSort(col)
   }
 
-  // Render links as free text with auto-clickable URLs, preserving newlines
-  const renderLinks = (links: string | null): React.ReactNode => {
-    if (!links) return "-"
-    
-    // URL regex pattern
-    const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi
-    
-    // Split by newlines to preserve line breaks
-    const lines = links.split(/\r?\n/)
-    
-    return (
-      <div className="flex flex-col gap-1 whitespace-pre-wrap break-words">
-        {lines.map((line, lineIndex) => {
-          if (!line.trim()) {
-            return <br key={lineIndex} />
-          }
-          
-          const parts: React.ReactNode[] = []
-          let lastIndex = 0
-          let match: RegExpExecArray | null
-          
-          // Reset regex
-          urlRegex.lastIndex = 0
-          
-          while ((match = urlRegex.exec(line)) !== null) {
-            // Add text before the URL
-            if (match.index > lastIndex) {
-              parts.push(line.substring(lastIndex, match.index))
-            }
-            
-            // Add clickable URL
-            const url = match[0].startsWith("http://") || match[0].startsWith("https://") 
-              ? match[0] 
-              : `https://${match[0]}`
-            
-            parts.push(
-              <a
-                key={`${lineIndex}-${match.index}`}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline break-all"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {match[0]}
-              </a>
-            )
-            
-            lastIndex = match.index + match[0].length
-          }
-          
-          // Add remaining text after last URL
-          if (lastIndex < line.length) {
-            parts.push(line.substring(lastIndex))
-          }
-          
-          // If no URLs found, just return the line as text
-          if (parts.length === 0) {
-            return <span key={lineIndex}>{line}</span>
-          }
-          
-          return <div key={lineIndex}>{parts}</div>
-        })}
-      </div>
-    )
-  }
-
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-8">
@@ -503,104 +427,25 @@ export default function SourcesPage() {
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-80">
-          <div className="space-y-4">
-            <div>
-              <Label className="text-sm font-medium">{t.sources.columnSettings.showHide}</Label>
-              <p className="text-xs text-muted-foreground mb-2">{t.sources.columnSettings.reorder}</p>
-              <div className="mt-2 space-y-2 max-h-[400px] overflow-y-auto">
-                {columnOrder.map((col, index) => (
-                  <div
-                    key={col}
-                    draggable
-                    onDragStart={() => {
-                      setDraggedColumnIndex(index)
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      setDragOverColumnIndex(index)
-                    }}
-                    onDragLeave={() => {
-                      setDragOverColumnIndex(null)
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      if (draggedColumnIndex !== null && draggedColumnIndex !== index) {
-                        const newOrder = [...columnOrder]
-                        const [removed] = newOrder.splice(draggedColumnIndex, 1)
-                        newOrder.splice(index, 0, removed)
-                        setColumnOrder(newOrder)
-                      }
-                      setDraggedColumnIndex(null)
-                      setDragOverColumnIndex(null)
-                    }}
-                    className={`flex items-center space-x-2 p-2 rounded-md transition-colors cursor-move ${
-                      dragOverColumnIndex === index ? "bg-accent" : ""
-                    } ${draggedColumnIndex === index ? "opacity-50" : ""}`}
-                  >
-                    <div className="text-muted-foreground select-none">⋮⋮</div>
-                    <Checkbox
-                      id={col}
-                      checked={columnVisibility[col]}
-                      onCheckedChange={(checked) => {
-                        setColumnVisibility({ ...columnVisibility, [col]: checked as boolean })
-                      }}
-                    />
-                    <Label htmlFor={col} className="text-sm font-normal cursor-pointer flex-1">
-                      {getColumnLabel(col)}
-                    </Label>
-                    <div className="flex flex-col gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 p-0"
-                        onClick={() => {
-                          if (index > 0) {
-                            const newOrder = [...columnOrder]
-                            newOrder[index] = columnOrder[index - 1]
-                            newOrder[index - 1] = col
-                            setColumnOrder(newOrder)
-                          }
-                        }}
-                        disabled={index === 0}
-                      >
-                        <ChevronUp className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 p-0"
-                        onClick={() => {
-                          if (index < columnOrder.length - 1) {
-                            const newOrder = [...columnOrder]
-                            newOrder[index] = columnOrder[index + 1]
-                            newOrder[index + 1] = col
-                            setColumnOrder(newOrder)
-                          }
-                        }}
-                        disabled={index === columnOrder.length - 1}
-                      >
-                        <ChevronDown className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 pt-2 border-t">
-              <Checkbox
-                id="autoResizeTextarea"
-                checked={autoResizeTextarea}
-                onCheckedChange={(checked) => {
-                  setAutoResizeTextarea(checked as boolean)
-                }}
+              <ColumnSettingsContent
+                columnOrder={columnOrder}
+                columnVisibility={columnVisibility}
+                draggedColumnIndex={draggedColumnIndex}
+                dragOverColumnIndex={dragOverColumnIndex}
+                setDraggedColumnIndex={setDraggedColumnIndex}
+                setDragOverColumnIndex={setDragOverColumnIndex}
+                setColumnOrder={setColumnOrder}
+                setColumnVisibility={setColumnVisibility}
+                getColumnLabel={getColumnLabel}
+                showAutoResizeToggle
+                autoResizeValue={autoResizeTextarea}
+                onAutoResizeChange={setAutoResizeTextarea}
+                autoResizeLabel="Auto-resize textarea when editing"
+                showHideLabel={t.sources.columnSettings.showHide}
+                reorderLabel={t.sources.columnSettings.reorder}
               />
-              <Label htmlFor="autoResizeTextarea" className="text-sm font-normal cursor-pointer">
-                Auto-resize textarea when editing
-              </Label>
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
@@ -669,7 +514,7 @@ export default function SourcesPage() {
         </Button>
       </div>
 
-      {/* Table */}
+      {/* Table of sources */}
       {sources.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
           <p className="text-muted-foreground mb-6">{t.sources.noSources}</p>
@@ -1672,90 +1517,20 @@ export default function SourcesPage() {
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-80">
-                        <div className="space-y-4">
-                          <div>
-                            <Label className="text-sm font-medium">{t.sources.columnSettings.showHide}</Label>
-                            <p className="text-xs text-muted-foreground mb-2">{t.sources.columnSettings.reorder}</p>
-                            <div className="mt-2 space-y-2 max-h-[400px] overflow-y-auto">
-                              {importColumnOrder.map((col, index) => (
-                                <div
-                                  key={col}
-                                  draggable
-                                  onDragStart={() => {
-                                    setImportDraggedColumnIndex(index)
-                                  }}
-                                  onDragOver={(e) => {
-                                    e.preventDefault()
-                                    setImportDragOverColumnIndex(index)
-                                  }}
-                                  onDragLeave={() => {
-                                    setImportDragOverColumnIndex(null)
-                                  }}
-                                  onDrop={(e) => {
-                                    e.preventDefault()
-                                    if (importDraggedColumnIndex !== null && importDraggedColumnIndex !== index) {
-                                      const newOrder = [...importColumnOrder]
-                                      const [removed] = newOrder.splice(importDraggedColumnIndex, 1)
-                                      newOrder.splice(index, 0, removed)
-                                      setImportColumnOrder(newOrder)
-                                    }
-                                    setImportDraggedColumnIndex(null)
-                                    setImportDragOverColumnIndex(null)
-                                  }}
-                                  className={`flex items-center space-x-2 p-2 rounded-md transition-colors cursor-move ${
-                                    importDragOverColumnIndex === index ? "bg-accent" : ""
-                                  } ${importDraggedColumnIndex === index ? "opacity-50" : ""}`}
-                                >
-                                  <div className="text-muted-foreground select-none">⋮⋮</div>
-                                  <Checkbox
-                                    id={`import-${col}`}
-                                    checked={importColumnVisibility[col]}
-                                    onCheckedChange={(checked) => {
-                                      setImportColumnVisibility({ ...importColumnVisibility, [col]: checked as boolean })
-                                    }}
-                                  />
-                                  <Label htmlFor={`import-${col}`} className="text-sm font-normal cursor-pointer flex-1">
-                                    {getColumnLabel(col)}
-                                  </Label>
-                                  <div className="flex flex-col gap-0.5">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-5 w-5 p-0"
-                                      onClick={() => {
-                                        if (index > 0) {
-                                          const newOrder = [...importColumnOrder]
-                                          newOrder[index] = importColumnOrder[index - 1]
-                                          newOrder[index - 1] = col
-                                          setImportColumnOrder(newOrder)
-                                        }
-                                      }}
-                                      disabled={index === 0}
-                                    >
-                                      <ChevronUp className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-5 w-5 p-0"
-                                      onClick={() => {
-                                        if (index < importColumnOrder.length - 1) {
-                                          const newOrder = [...importColumnOrder]
-                                          newOrder[index] = importColumnOrder[index + 1]
-                                          newOrder[index + 1] = col
-                                          setImportColumnOrder(newOrder)
-                                        }
-                                      }}
-                                      disabled={index === importColumnOrder.length - 1}
-                                    >
-                                      <ChevronDown className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
+                        <ColumnSettingsContent
+                          columnOrder={importColumnOrder}
+                          columnVisibility={importColumnVisibility}
+                          draggedColumnIndex={importDraggedColumnIndex}
+                          dragOverColumnIndex={importDragOverColumnIndex}
+                          setDraggedColumnIndex={setImportDraggedColumnIndex}
+                          setDragOverColumnIndex={setImportDragOverColumnIndex}
+                          setColumnOrder={setImportColumnOrder}
+                          setColumnVisibility={setImportColumnVisibility}
+                          getColumnLabel={getColumnLabel}
+                          idPrefix="import-"
+                          showHideLabel={t.sources.columnSettings.showHide}
+                          reorderLabel={t.sources.columnSettings.reorder}
+                        />
                       </PopoverContent>
                     </Popover>
                   </div>

@@ -567,7 +567,7 @@ export async function getCitationsFromGithub(projectId: string) {
   
   // Get tags for sources to calculate topic usage
   const sourceIds = Array.from(matchedSources)
-  let topicUsage: Record<string, number> = {}
+  const topicUsage: Record<string, number> = {}
   
   if (sourceIds.length > 0) {
     const sourceTagRelations = await db

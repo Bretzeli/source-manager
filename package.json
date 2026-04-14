@@ -15,6 +15,7 @@
     "db:fix-migrations": "npx tsx scripts/mark-migrations-applied.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.38.0",
     "@hookform/resolvers": "^5.2.2",
     "@neondatabase/serverless": "^1.0.2",
     "@radix-ui/react-accordion": "^1.2.12",
@@ -43,6 +44,7 @@
     "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@tailwindcss/typography": "^0.5.19",
     "@types/jsonwebtoken": "^9.0.10",
     "better-auth": "^1.4.10",
     "class-variance-authority": "^0.7.1",
@@ -62,6 +64,7 @@
     "react-day-picker": "^9.13.0",
     "react-dom": "19.2.3",
     "react-hook-form": "^7.70.0",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.3.3",
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
