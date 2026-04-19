@@ -20,11 +20,13 @@ export function AutoResizeTextarea({
   ...props
 }: AutoResizeTextareaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  const lastAutoHeightRef = React.useRef<number | undefined>(undefined)
   const [height, setHeight] = React.useState<number | undefined>(initialHeight)
   const [width, setWidth] = React.useState<number | undefined>(initialWidth)
 
   // Set initial size to match cell
   React.useEffect(() => {
+    lastAutoHeightRef.current = undefined
     if (textareaRef.current) {
       if (initialHeight !== undefined) {
         setHeight(initialHeight)
@@ -37,17 +39,16 @@ export function AutoResizeTextarea({
     }
   }, [initialHeight, initialWidth])
 
-  // Auto-resize on content change
-  React.useEffect(() => {
-    if (textareaRef.current && autoResize) {
-      // Reset height to auto to get the correct scrollHeight
-      textareaRef.current.style.height = "auto"
-      // Set height to scrollHeight, but don't go below initial height
-      const newHeight = Math.max(
-        textareaRef.current.scrollHeight,
-        initialHeight || 0
-      )
-      textareaRef.current.style.height = `${newHeight}px`
+  // Auto-resize on content change — sync DOM height every time; only commit height to
+  // React state when it actually changes so we avoid an extra render per keystroke.
+  React.useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el || !autoResize) return
+    el.style.height = "auto"
+    const newHeight = Math.max(el.scrollHeight, initialHeight || 0)
+    el.style.height = `${newHeight}px`
+    if (lastAutoHeightRef.current !== newHeight) {
+      lastAutoHeightRef.current = newHeight
       setHeight(newHeight)
     }
   }, [value, autoResize, initialHeight])

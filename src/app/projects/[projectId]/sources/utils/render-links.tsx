@@ -35,7 +35,7 @@ export function renderLinks(links: string | null): React.ReactNode {
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-primary hover:underline break-all"
+              className="cursor-pointer text-primary font-medium underline underline-offset-2 decoration-primary/45 transition-colors hover:decoration-primary hover:text-primary/90 break-all"
               onClick={(e) => e.stopPropagation()}
             >
               {match[0]}

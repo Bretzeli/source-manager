@@ -450,11 +450,13 @@ export function useSources() {
     setOriginalValue("")
   }
 
-  const handleCellSave = async () => {
+  const handleCellSave = async (committedValue?: string) => {
     if (!editingCell) return
 
     const source = sources.find((s) => s.id === editingCell.sourceId)
     if (!source) return
+
+    const value = committedValue !== undefined ? committedValue : editValue
 
     try {
       const updateData: {
@@ -467,11 +469,11 @@ export function useSources() {
         links?: string | null
         bibtex?: string | null
         tagIds?: string[]
-      } = { [editingCell.column]: editValue || null }
+      } = { [editingCell.column]: value || null }
 
       // Bibtex to fields: fills fields when bibtex is entered/changed (one-way)
       if (editingCell.column === "bibtex") {
-        const parsed = parseBibtex(editValue)
+        const parsed = parseBibtex(value)
         if (parsed) {
           const fields = bibtexToSourceFields(parsed)
           // Always sync abbreviation from bibtex key (bidirectional for abbreviation)
@@ -493,7 +495,7 @@ export function useSources() {
         if (source.bibtex) {
           const parsed = parseBibtex(source.bibtex)
           if (parsed) {
-            parsed.key = editValue || "source"
+            parsed.key = value || "source"
             updateData.bibtex = serializeBibtex(parsed)
           }
         }

@@ -50,16 +50,22 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { AutoResizeTextarea } from "@/components/auto-resize-textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, X, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize, FileDown } from "lucide-react"
+import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize, FileDown, Expand } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ColumnKey, Source } from "@/types/sources"
 import { PDFExportDialog } from "@/components/pdf-export-dialog"
 import { PREDEFINED_COLORS } from "./constants"
 import { renderLinks } from "./utils/render-links"
 import { ColumnSettingsContent } from "./components/ColumnSettingsContent"
+import { InlineSourceCellEditor } from "./inline-source-cell-editor"
 import { ProjectNavbarSync } from "@/components/project-navbar-sync"
+import {
+  SourcesRichTextFullscreenDialog,
+  type RichTextColumn,
+  type SourcesRichTextSession,
+} from "./sources-rich-text-fullscreen-dialog"
+import { SourcesMarkdownPreview } from "./sources-markdown-preview"
 
 export default function SourcesPage() {
   const { t } = useTranslations()
@@ -116,7 +122,6 @@ export default function SourcesPage() {
     setAutoResizeTextarea,
     editingCell,
     editValue,
-    setEditValue,
     newSource,
     setNewSource,
     creating,
@@ -209,6 +214,9 @@ export default function SourcesPage() {
   const [tagToDelete, setTagToDelete] = React.useState<{ id: string; name: string } | null>(null)
   const [fullScreen, setFullScreen] = React.useState(false)
   const [cellDimensions, setCellDimensions] = React.useState<{ width: number; height: number } | null>(null)
+  const [richTextFontSize, setRichTextFontSize] = React.useState("14")
+  const [richTextMarkdownMode, setRichTextMarkdownMode] = React.useState(false)
+  const [richTextSession, setRichTextSession] = React.useState<SourcesRichTextSession | null>(null)
 
   const getColumnLabel = (key: ColumnKey) => {
     return t.sources.columns[key]
@@ -298,6 +306,20 @@ export default function SourcesPage() {
       return
     }
     handleSort(col)
+  }
+
+  const openRichTextEditor = (sourceId: string, column: RichTextColumn, value: string | null, markdownModeHint?: boolean) => {
+    handleCellDoubleClick(sourceId, column, value)
+    const initialMarkdownMode = markdownModeHint !== undefined ? markdownModeHint : richTextMarkdownMode
+    if (markdownModeHint !== undefined) {
+      setRichTextMarkdownMode(markdownModeHint)
+    }
+    setRichTextSession({
+      sourceId,
+      column,
+      initialValue: value || "",
+      initialMarkdownMode,
+    })
   }
 
   if (loading) {
@@ -638,70 +660,21 @@ export default function SourcesPage() {
                             style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                           >
                             {isEditing ? (
-                              <div className="flex items-center gap-2">
-                                {(col === "bibtex" || col === "description" || col === "notes" || col === "links") ? (
-                                  <AutoResizeTextarea
-                                    value={editValue}
-                                    onChange={(e) => setEditValue(e.target.value)}
-                                    onBlur={(e) => {
-                                      if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).closest('button[title="Cancel"]')) {
-                                        setCellDimensions(null)
-                                        handleCellSave()
-                                      }
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter" && !e.shiftKey && col !== "links") {
-                                        e.preventDefault()
-                                        handleCellSave()
-                                      } else if (e.key === "Escape") {
-                                        e.preventDefault()
-                                        setCellDimensions(null)
-                                        handleCellCancel()
-                                      }
-                                    }}
-                                    autoFocus
-                                    autoResize={autoResizeTextarea}
-                                    initialWidth={cellDimensions ? cellDimensions.width - 40 : undefined}
-                                    initialHeight={cellDimensions?.height}
-                                    className="flex-1"
-                                  />
-                                ) : (
-                                  <Input
-                                    value={editValue}
-                                    onChange={(e) => setEditValue(e.target.value)}
-                                    onBlur={(e) => {
-                                      if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).closest('button[title="Cancel"]')) {
-                                        handleCellSave()
-                                      }
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault()
-                                        handleCellSave()
-                                      } else if (e.key === "Escape") {
-                                        handleCellCancel()
-                                      }
-                                    }}
-                                    autoFocus
-                                    className="h-8"
-                                  />
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive transition-colors"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault()
-                                  }}
-                                  onClick={() => {
-                                    setCellDimensions(null)
-                                    handleCellCancel()
-                                  }}
-                                  title="Cancel"
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </div>
+                              <InlineSourceCellEditor
+                                key={`${source.id}-${col}`}
+                                column={col}
+                                initialValue={editValue}
+                                cellDimensions={cellDimensions}
+                                autoResizeTextarea={autoResizeTextarea}
+                                richTextFontSize={richTextFontSize}
+                                markdownModeOnMount={richTextMarkdownMode}
+                                onOpenFullscreen={(draft, mdMode) =>
+                                  openRichTextEditor(source.id, col as RichTextColumn, draft, mdMode)
+                                }
+                                onCommit={(value) => void handleCellSave(value)}
+                                onCancel={handleCellCancel}
+                                onClearCellDimensions={() => setCellDimensions(null)}
+                              />
                             ) : col === "tags" ? (
                               <Popover>
                                 <PopoverTrigger asChild>
@@ -769,9 +742,25 @@ export default function SourcesPage() {
                                   </div>
                                 </PopoverContent>
                               </Popover>
-                            ) : col === "bibtex" || col === "description" || col === "notes" ? (
+                            ) : col === "bibtex" ? (
                               <div className="text-sm whitespace-pre-wrap break-words">
                                 {cellValue || "-"}
+                              </div>
+                            ) : col === "description" || col === "notes" ? (
+                              <div className="relative pr-8">
+                                <SourcesMarkdownPreview markdown={cellValue} fontSizePx={richTextFontSize} />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute top-0 right-0 h-6 w-6"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openRichTextEditor(source.id, col as RichTextColumn, cellValue)
+                                  }}
+                                  title="Open editor mode"
+                                >
+                                  <Expand className="h-3.5 w-3.5" />
+                                </Button>
                               </div>
                             ) : col === "publicationDate" ? (
                               <div className="text-sm break-words">{formatPublicationDate(cellValue)}</div>
@@ -1190,6 +1179,15 @@ export default function SourcesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SourcesRichTextFullscreenDialog
+        key={richTextSession ? `${richTextSession.sourceId}-${richTextSession.column}` : "rich-text-closed"}
+        session={richTextSession}
+        onClose={() => setRichTextSession(null)}
+        fontSize={richTextFontSize}
+        onFontSizeChange={setRichTextFontSize}
+        onSave={handleCellSave}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
