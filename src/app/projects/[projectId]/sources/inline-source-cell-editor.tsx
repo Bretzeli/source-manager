@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { AutoResizeTextarea } from "@/components/auto-resize-textarea"
 import { Expand, FileText, X } from "lucide-react"
 import type { ColumnKey } from "@/types/sources"
+import { prepareRichTextMarkdownForRender } from "./rich-text-markdown-utils"
 
 const RICH_TEXT_PROSE_LINK_STYLES =
   "[&_a]:cursor-pointer [&_a]:text-primary [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-primary/45 [&_a]:transition-colors hover:[&_a]:decoration-primary hover:[&_a]:text-primary/90 [&_a]:break-all"
@@ -85,10 +86,6 @@ function insertListMarkdownAtSelection(
   return { nextValue, caretStart: caretPos, caretEnd: caretPos }
 }
 
-function normalizeMarkdownForListParsing(markdown: string) {
-  return markdown.replace(/([^\n])\n((?:\s*)(?:[-*+]|\d+\.)\s+)/g, "$1\n\n$2")
-}
-
 type InlineSourceCellEditorProps = {
   column: ColumnKey
   initialValue: string
@@ -107,7 +104,7 @@ function renderMarkdownContent(value: string | null | undefined) {
   return (
     <div className={`prose prose-sm max-w-none break-words dark:prose-invert ${RICH_TEXT_PROSE_LINK_STYLES}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-        {normalizeMarkdownForListParsing(value)}
+        {prepareRichTextMarkdownForRender(value)}
       </ReactMarkdown>
     </div>
   )

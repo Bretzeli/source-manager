@@ -48,12 +48,68 @@ import {
   FileText,
 } from "lucide-react"
 import { PREDEFINED_COLORS } from "./constants"
-import { normalizeMarkdownForListParsing, RICH_TEXT_PROSE_LINK_STYLES } from "./rich-text-markdown-utils"
+import { prepareRichTextMarkdownForRender, RICH_TEXT_PROSE_LINK_STYLES } from "./rich-text-markdown-utils"
 
 const RICH_TEXT_FONT_SIZES = ["12", "14", "16", "18", "20", "24"]
 const RICH_TEXT_COLORS = [...PREDEFINED_COLORS.map((color) => color.value), "#ffffff", "#d1d5db", "#f59e0b", "#22c55e", "#0ea5e9", "#8b5cf6", "#ec4899"]
 
+/** Relative to the editor base font size (inline `fontSize` on the contenteditable). */
+const RICH_TEXT_VISUAL_HEADING_CLASSES =
+  "[&_h1]:!text-[160%] [&_h1]:!font-semibold [&_h1]:!leading-snug [&_h1]:!mt-4 [&_h1]:!mb-2 " +
+  "[&_h2]:!text-[142%] [&_h2]:!font-semibold [&_h2]:!leading-snug [&_h2]:!mt-3 [&_h2]:!mb-1.5 " +
+  "[&_h3]:!text-[128%] [&_h3]:!font-medium [&_h3]:!leading-snug [&_h3]:!mt-3 [&_h3]:!mb-1 " +
+  "[&_h4]:!text-[115%] [&_h4]:!font-medium [&_h4]:!leading-normal [&_h4]:!mt-2 [&_h4]:!mb-1"
+
+type WysiwygToolbarState = {
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  blockTag: "normal" | "h1" | "h2" | "h3" | "h4"
+}
+
+const DEFAULT_WYSIWYG_TOOLBAR_STATE: WysiwygToolbarState = {
+  bold: false,
+  italic: false,
+  underline: false,
+  blockTag: "normal",
+}
+
+function parseFormatBlockTag(): "normal" | "h1" | "h2" | "h3" | "h4" {
+  try {
+    const raw = (document.queryCommandValue("formatBlock") || "").toLowerCase().replace(/[<>]/g, "").trim()
+    if (raw === "h1" || raw === "h2" || raw === "h3" || raw === "h4") return raw
+  } catch {
+    // ignore
+  }
+  return "normal"
+}
+
+const RICH_TEXT_EMPTY_BLOCK_MD = "\n\n\u00a0\n\n"
+
 const turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" })
+
+function isEmptyRichTextBlockForTurndown(node: HTMLElement): boolean {
+  const normalized = (node.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim()
+  if (normalized !== "") return false
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) continue
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      if ((child as Element).nodeName !== "BR") return false
+    }
+  }
+  return true
+}
+
+turndownService.addRule("richTextEmptyBlock", {
+  filter(node) {
+    const name = node.nodeName
+    if (name !== "P" && name !== "DIV") return false
+    return isEmptyRichTextBlockForTurndown(node as HTMLElement)
+  },
+  replacement() {
+    return RICH_TEXT_EMPTY_BLOCK_MD
+  },
+})
 
 export type RichTextColumn = "description" | "notes"
 
@@ -145,7 +201,7 @@ function insertListMarkdownAtSelection(
 }
 
 function markdownToHtml(markdown: string) {
-  return marked.parse(markdown, { breaks: true, gfm: true }) as string
+  return marked.parse(prepareRichTextMarkdownForRender(markdown), { breaks: true, gfm: true }) as string
 }
 
 function ensureClickableAnchorsInEditable(root: HTMLElement) {
@@ -295,6 +351,7 @@ export function SourcesRichTextFullscreenDialog({
   const [richTextLinkDialogOpen, setRichTextLinkDialogOpen] = React.useState(false)
   const [richTextLinkText, setRichTextLinkText] = React.useState("")
   const [richTextLinkUrl, setRichTextLinkUrl] = React.useState("")
+  const [wysiwygToolbarState, setWysiwygToolbarState] = React.useState<WysiwygToolbarState>(DEFAULT_WYSIWYG_TOOLBAR_STATE)
 
   const richTextLinkRangeRef = React.useRef<Range | null>(null)
   const richEditorTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
@@ -313,7 +370,7 @@ export function SourcesRichTextFullscreenDialog({
     (node: HTMLDivElement | null) => {
       richEditorVisualRef.current = node
       if (!node || !open || markdownMode) return
-      const html = markdownToHtml(normalizeMarkdownForListParsing(draft))
+      const html = markdownToHtml(draft)
       if (!html.trim()) return
       if (!node.textContent?.trim()) {
         node.innerHTML = html
@@ -322,6 +379,60 @@ export function SourcesRichTextFullscreenDialog({
     },
     [open, markdownMode, draft]
   )
+
+  const flushRichEditorToolbarState = React.useCallback(() => {
+    const visual = richEditorVisualRef.current
+    if (!visual || markdownMode) return
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return
+    if (!sel.anchorNode || !visual.contains(sel.anchorNode)) return
+
+    let bold = false
+    let italic = false
+    let underline = false
+    try {
+      bold = document.queryCommandState("bold")
+      italic = document.queryCommandState("italic")
+      underline = document.queryCommandState("underline")
+    } catch {
+      return
+    }
+    const blockTag = parseFormatBlockTag()
+    setWysiwygToolbarState((prev) => {
+      if (prev.bold === bold && prev.italic === italic && prev.underline === underline && prev.blockTag === blockTag) {
+        return prev
+      }
+      return { bold, italic, underline, blockTag }
+    })
+  }, [markdownMode])
+
+  React.useEffect(() => {
+    if (markdownMode) setWysiwygToolbarState(DEFAULT_WYSIWYG_TOOLBAR_STATE)
+  }, [markdownMode])
+
+  React.useEffect(() => {
+    if (!open || markdownMode) return
+
+    let rafPending = false
+    let rafId = 0
+
+    const schedule = () => {
+      if (rafPending) return
+      rafPending = true
+      rafId = requestAnimationFrame(() => {
+        rafPending = false
+        flushRichEditorToolbarState()
+      })
+    }
+
+    document.addEventListener("selectionchange", schedule)
+    schedule()
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      document.removeEventListener("selectionchange", schedule)
+    }
+  }, [open, markdownMode, flushRichEditorToolbarState])
 
   const openRichTextLinkDialog = React.useCallback(() => {
     const visual = richEditorVisualRef.current
@@ -408,9 +519,10 @@ export function SourcesRichTextFullscreenDialog({
 
     ensureClickableAnchorsInEditable(visual)
     setDraft(htmlToMarkdown(visual.innerHTML))
+    flushRichEditorToolbarState()
     setRichTextLinkDialogOpen(false)
     richTextLinkRangeRef.current = null
-  }, [richTextLinkText, richTextLinkUrl])
+  }, [richTextLinkText, richTextLinkUrl, flushRichEditorToolbarState])
 
   React.useEffect(() => {
     if (!richTextLinkDialogOpen) return
@@ -456,6 +568,9 @@ export function SourcesRichTextFullscreenDialog({
           case "underline":
             document.execCommand("underline")
             break
+          case "formatNormal":
+            document.execCommand("formatBlock", false, "p")
+            break
           case "h1":
             document.execCommand("formatBlock", false, "h1")
             break
@@ -493,6 +608,7 @@ export function SourcesRichTextFullscreenDialog({
         }
         ensureClickableAnchorsInEditable(visual)
         setDraft(htmlToMarkdown(visual.innerHTML))
+        flushRichEditorToolbarState()
         return
       }
 
@@ -553,7 +669,7 @@ export function SourcesRichTextFullscreenDialog({
         textarea.setSelectionRange(result.caretStart, result.caretEnd)
       })
     },
-    [markdownMode, draft]
+    [markdownMode, draft, flushRichEditorToolbarState]
   )
 
   const toggleRichTextMode = React.useCallback(() => {
@@ -679,6 +795,7 @@ export function SourcesRichTextFullscreenDialog({
       document.execCommand("insertHTML", false, html)
       ensureClickableAnchorsInEditable(richEditorVisualRef.current)
       setDraft(htmlToMarkdown(richEditorVisualRef.current.innerHTML))
+      flushRichEditorToolbarState()
       return
     }
 
@@ -689,7 +806,7 @@ export function SourcesRichTextFullscreenDialog({
     const rowTemplate = `| ${Array.from({ length: cols }, () => " ").join(" | ")} |`
     const tableMarkdown = [header, sep, ...Array.from({ length: rows }, () => rowTemplate)].join("\n")
     setDraft((prev) => `${prev}${prev.endsWith("\n") || !prev ? "" : "\n"}${tableMarkdown}\n`)
-  }, [markdownMode, tableRows, tableCols])
+  }, [markdownMode, tableRows, tableCols, flushRichEditorToolbarState])
 
   const applyColor = React.useCallback(
     (mode: "color" | "highlight", color: string) => {
@@ -704,6 +821,7 @@ export function SourcesRichTextFullscreenDialog({
         }
         ensureClickableAnchorsInEditable(visual)
         setDraft(htmlToMarkdown(visual.innerHTML))
+        flushRichEditorToolbarState()
         return
       }
 
@@ -721,15 +839,18 @@ export function SourcesRichTextFullscreenDialog({
         return result.nextValue
       })
     },
-    [markdownMode]
+    [markdownMode, flushRichEditorToolbarState]
   )
 
   const applyTextType = React.useCallback(
     (type: "normal" | "h1" | "h2" | "h3" | "h4") => {
-      if (type === "normal") return
+      if (type === "normal") {
+        if (!markdownMode) runEditorCommand("formatNormal")
+        return
+      }
       runEditorCommand(type)
     },
-    [runEditorCommand]
+    [runEditorCommand, markdownMode]
   )
 
   const save = React.useCallback(() => {
@@ -756,7 +877,7 @@ export function SourcesRichTextFullscreenDialog({
     const applyVisualFromMarkdownAndRestoreCaret = () => {
       const el = richEditorVisualRef.current
       if (!el || cancelled) return false
-      el.innerHTML = markdownToHtml(normalizeMarkdownForListParsing(draft))
+      el.innerHTML = markdownToHtml(draft)
       ensureClickableAnchorsInEditable(el)
       const bridge = fullscreenRichEditorSelectionBridgeRef.current
       if (bridge?.kind === "markdown") {
@@ -898,7 +1019,13 @@ export function SourcesRichTextFullscreenDialog({
                 ))}
               </SelectContent>
             </Select>
-            <Select defaultValue="normal" onValueChange={(value) => applyTextType(value as "normal" | "h1" | "h2" | "h3" | "h4")}>
+            <Select
+              key={markdownMode ? "rich-text-type-md" : "rich-text-type-wysiwyg"}
+              {...(markdownMode
+                ? ({ defaultValue: "normal" } as const)
+                : { value: wysiwygToolbarState.blockTag })}
+              onValueChange={(value) => applyTextType(value as "normal" | "h1" | "h2" | "h3" | "h4")}
+            >
               <SelectTrigger className="w-[130px] h-9" data-rich-editor-control="true">
                 <SelectValue placeholder="Text type" />
               </SelectTrigger>
@@ -910,25 +1037,102 @@ export function SourcesRichTextFullscreenDialog({
                 <SelectItem value="h4">Headline 4</SelectItem>
               </SelectContent>
             </Select>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("bold")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.bold ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.bold}
+              title="Bold (Ctrl+B)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("bold")}
+              data-rich-editor-control="true"
+            >
               <Bold className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("italic")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.italic ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.italic}
+              title="Italic (Ctrl+I)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("italic")}
+              data-rich-editor-control="true"
+            >
               <Italic className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("underline")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.underline ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.underline}
+              title="Underline (Ctrl+U)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("underline")}
+              data-rich-editor-control="true"
+            >
               <Underline className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("h1")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.blockTag === "h1" ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h1"}
+              title="Heading 1 (Ctrl+Alt+1)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("h1")}
+              data-rich-editor-control="true"
+            >
               <Heading1 className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("h2")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.blockTag === "h2" ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h2"}
+              title="Heading 2 (Ctrl+Alt+2)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("h2")}
+              data-rich-editor-control="true"
+            >
               <Heading2 className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("h3")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.blockTag === "h3" ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h3"}
+              title="Heading 3 (Ctrl+Alt+3)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("h3")}
+              data-rich-editor-control="true"
+            >
               <Heading3 className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("h4")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              type="button"
+              variant={!markdownMode && wysiwygToolbarState.blockTag === "h4" ? "secondary" : "outline"}
+              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h4"}
+              title="Heading 4 (Ctrl+Alt+4)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("h4")}
+              data-rich-editor-control="true"
+            >
               <Heading4 className="h-4 w-4" />
             </Button>
             <Button
@@ -1023,12 +1227,13 @@ export function SourcesRichTextFullscreenDialog({
                 <div
                   ref={assignRichEditorVisualRef}
                   contentEditable
-                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
+                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
                   style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
                   onInput={(e) => {
                     const el = e.currentTarget as HTMLDivElement
                     ensureClickableAnchorsInEditable(el)
                     setDraft(htmlToMarkdown(el.innerHTML))
+                    flushRichEditorToolbarState()
                   }}
                   onKeyDown={(e) => handleEditorKeyDown(e as unknown as React.KeyboardEvent<HTMLTextAreaElement>)}
                 />
