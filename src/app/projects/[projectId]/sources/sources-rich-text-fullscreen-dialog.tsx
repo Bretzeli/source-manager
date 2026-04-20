@@ -788,7 +788,7 @@ export function SourcesRichTextFullscreenDialog({
         ...Array.from({ length: cols }, (_, i) => `<th>Column ${i + 1}</th>`),
         "</tr></thead>",
         "<tbody>",
-        ...Array.from({ length: rows }, () => `<tr>${Array.from({ length: cols }, () => "<td>&nbsp;</td>").join("")}</tr>`),
+        ...Array.from({ length: rows }, () => `<tr>${Array.from({ length: cols }, () => "<td><br /></td>").join("")}</tr>`),
         "</tbody>",
         "</table>",
       ].join("")
@@ -1227,7 +1227,7 @@ export function SourcesRichTextFullscreenDialog({
                 <div
                   ref={assignRichEditorVisualRef}
                   contentEditable
-                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
+                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_thead]:bg-muted/40 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_td]:align-top [&_td]:min-h-[2rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
                   style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
                   onInput={(e) => {
                     const el = e.currentTarget as HTMLDivElement
