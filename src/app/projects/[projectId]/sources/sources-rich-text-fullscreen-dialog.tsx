@@ -3,6 +3,7 @@
 import * as React from "react"
 import { marked } from "marked"
 import TurndownService from "turndown"
+import { gfm } from "turndown-plugin-gfm"
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { Toggle } from "@/components/ui/toggle"
 import {
   Bold,
   Italic,
@@ -43,9 +45,14 @@ import {
   AlignCenter,
   AlignJustify,
   Table2,
-  Minus,
-  PlusCircle,
+  Rows3,
+  Rows2,
+  Columns3,
+  Columns2,
+  Trash2,
   FileText,
+  BetweenVerticalStart,
+  BetweenHorizontalStart,
 } from "lucide-react"
 import { PREDEFINED_COLORS } from "./constants"
 import { prepareRichTextMarkdownForRender, RICH_TEXT_PROSE_LINK_STYLES } from "./rich-text-markdown-utils"
@@ -67,6 +74,16 @@ type WysiwygToolbarState = {
   blockTag: "normal" | "h1" | "h2" | "h3" | "h4"
 }
 
+type TableSelectionState = {
+  rowIndex: number
+  colIndex: number
+  rowCount: number
+  colCount: number
+}
+
+type RowDeleteTarget = "current" | "above" | "below" | "top" | "bottom"
+type ColDeleteTarget = "current" | "left" | "right" | "start" | "end"
+
 const DEFAULT_WYSIWYG_TOOLBAR_STATE: WysiwygToolbarState = {
   bold: false,
   italic: false,
@@ -87,6 +104,7 @@ function parseFormatBlockTag(): "normal" | "h1" | "h2" | "h3" | "h4" {
 const RICH_TEXT_EMPTY_BLOCK_MD = "\n\n\u00a0\n\n"
 
 const turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" })
+turndownService.use(gfm)
 
 function isEmptyRichTextBlockForTurndown(node: HTMLElement): boolean {
   const normalized = (node.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim()
@@ -108,6 +126,19 @@ turndownService.addRule("richTextEmptyBlock", {
   },
   replacement() {
     return RICH_TEXT_EMPTY_BLOCK_MD
+  },
+})
+
+/** GFM table rules drop custom `data-*` on cells/rows; keep full HTML when static highlights are present. */
+turndownService.addRule("preserveStaticTableHighlights", {
+  filter(node) {
+    if (node.nodeName !== "TABLE") return false
+    const el = node as HTMLElement
+    return !!el.querySelector("[data-static-row-highlight], [data-static-col-highlight]")
+  },
+  replacement(_content, node) {
+    const el = node as HTMLElement
+    return `\n\n${el.outerHTML.trim()}\n\n`
   },
 })
 
@@ -200,8 +231,35 @@ function insertListMarkdownAtSelection(
   return { nextValue, caretStart: caretPos, caretEnd: caretPos }
 }
 
+/** Remove `<br>` in table cells (breaks Turndown → GFM) and keep empty cells as NBSP for stable height. */
+function sanitizeRichEditorTableCells(html: string): string {
+  if (!html.includes("<table")) return html
+  try {
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html")
+    const root = doc.body.firstElementChild as HTMLDivElement | null
+    if (!root) return html
+    root.querySelectorAll("td, th").forEach((cell) => {
+      cell.querySelectorAll("br").forEach((br) => {
+        br.parentNode?.removeChild(br)
+      })
+      const text = (cell.textContent || "").replace(/\u00a0/g, " ").trim()
+      if (text === "") cell.textContent = "\u00a0"
+    })
+    root.querySelectorAll("tr[data-user-highlight-row]").forEach((tr) => {
+      tr.removeAttribute("data-user-highlight-row")
+    })
+    root.querySelectorAll("td[data-user-highlight-col], th[data-user-highlight-col]").forEach((cell) => {
+      cell.removeAttribute("data-user-highlight-col")
+    })
+    return root.innerHTML
+  } catch {
+    return html
+  }
+}
+
 function markdownToHtml(markdown: string) {
-  return marked.parse(prepareRichTextMarkdownForRender(markdown), { breaks: true, gfm: true }) as string
+  const raw = marked.parse(prepareRichTextMarkdownForRender(markdown), { breaks: true, gfm: true }) as string
+  return sanitizeRichEditorTableCells(raw)
 }
 
 function ensureClickableAnchorsInEditable(root: HTMLElement) {
@@ -218,19 +276,47 @@ function htmlToMarkdown(html: string) {
   return turndownService.turndown(html).trim()
 }
 
-function insertHtmlAtCursor(container: HTMLElement, html: string) {
+function isCollapsedAtEditableRootStart(container: HTMLElement, r: Range) {
+  if (!r.collapsed) return false
+  return r.startContainer === container && r.startOffset === 0 && container.childNodes.length > 0
+}
+
+/**
+ * Inserts HTML at a caret. Pass `preferredCaret` (e.g. last selection inside the editor) when the
+ * toolbar/popover steals focus — live `getSelection()` is often wrong and can prepend at offset 0.
+ */
+function insertHtmlAtCursor(container: HTMLElement, html: string, preferredCaret: Range | null = null) {
   const selection = window.getSelection()
   if (!selection) return
 
-  if (selection.rangeCount === 0 || !container.contains(selection.getRangeAt(0).commonAncestorContainer)) {
-    const range = document.createRange()
-    range.selectNodeContents(container)
-    range.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(range)
+  const pickLiveRange = (): Range | null => {
+    if (selection.rangeCount === 0) return null
+    const live = selection.getRangeAt(0).cloneRange()
+    if (!container.contains(live.commonAncestorContainer)) return null
+    if (isCollapsedAtEditableRootStart(container, live)) return null
+    return live
   }
 
-  const range = selection.getRangeAt(0)
+  let range: Range | null = null
+  if (preferredCaret) {
+    try {
+      if (container.contains(preferredCaret.commonAncestorContainer)) {
+        range = preferredCaret.cloneRange()
+      }
+    } catch {
+      range = null
+    }
+  }
+  if (!range) range = pickLiveRange()
+  if (!range) {
+    range = document.createRange()
+    range.selectNodeContents(container)
+    range.collapse(false)
+  }
+
+  selection.removeAllRanges()
+  selection.addRange(range.cloneRange())
+
   range.deleteContents()
 
   const wrapper = document.createElement("div")
@@ -251,6 +337,81 @@ function insertHtmlAtCursor(container: HTMLElement, html: string) {
     selection.removeAllRanges()
     selection.addRange(newRange)
   }
+}
+
+type ActiveTableContext = {
+  table: HTMLTableElement
+  row: HTMLTableRowElement
+  cell: HTMLTableCellElement
+  rowIndex: number
+  colIndex: number
+  rowCount: number
+  colCount: number
+}
+
+function getActiveTableContext(container: HTMLElement): ActiveTableContext | null {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  const range = selection.getRangeAt(0)
+  const anchorNode = range.commonAncestorContainer
+  if (!container.contains(anchorNode)) return null
+  const anchorEl = anchorNode.nodeType === Node.ELEMENT_NODE ? (anchorNode as Element) : anchorNode.parentElement
+  const cell = anchorEl?.closest("td, th") as HTMLTableCellElement | null
+  if (!cell) return null
+  const row = cell.closest("tr") as HTMLTableRowElement | null
+  const table = cell.closest("table") as HTMLTableElement | null
+  if (!row || !table) return null
+
+  const rowCount = table.rows.length
+  const colCount = Math.max(...Array.from(table.rows).map((r) => r.cells.length), 1)
+  const rowIndex = row.rowIndex
+  const colIndex = cell.cellIndex
+  if (rowIndex < 0 || colIndex < 0) return null
+
+  return { table, row, cell, rowIndex, colIndex, rowCount, colCount }
+}
+
+/** Non-breaking space keeps cells non-empty for Turndown → GFM without `<br>` breaking table rows. */
+const TABLE_CELL_NBSP = "\u00a0"
+
+function ensureTableCellHasEditableText(cell: HTMLTableCellElement) {
+  if (!cell.textContent?.replace(/\u00a0/g, " ").trim()) {
+    cell.textContent = TABLE_CELL_NBSP
+  }
+}
+
+function focusCell(cell: HTMLTableCellElement) {
+  const selection = window.getSelection()
+  if (!selection) return
+  ensureTableCellHasEditableText(cell)
+  const textNode = Array.from(cell.childNodes).find((n) => n.nodeType === Node.TEXT_NODE) as Text | undefined
+  const range = document.createRange()
+  if (textNode && textNode.length > 0) {
+    range.setStart(textNode, Math.min(1, textNode.length))
+    range.collapse(true)
+  } else {
+    range.selectNodeContents(cell)
+    range.collapse(true)
+  }
+  selection.removeAllRanges()
+  selection.addRange(range)
+  cell.focus()
+}
+
+function resolveRowDeleteIndex(context: ActiveTableContext, target: RowDeleteTarget) {
+  if (target === "current") return context.rowIndex
+  if (target === "above") return context.rowIndex - 1
+  if (target === "below") return context.rowIndex + 1
+  if (target === "top") return 0
+  return context.rowCount - 1
+}
+
+function resolveColumnDeleteIndex(context: ActiveTableContext, target: ColDeleteTarget) {
+  if (target === "current") return context.colIndex
+  if (target === "left") return context.colIndex - 1
+  if (target === "right") return context.colIndex + 1
+  if (target === "start") return 0
+  return context.colCount - 1
 }
 
 type FullscreenRichEditorSelectionBridge =
@@ -346,6 +507,13 @@ export function SourcesRichTextFullscreenDialog({
   const [markdownMode, setMarkdownMode] = React.useState(() => session?.initialMarkdownMode ?? false)
   const [tableRows, setTableRows] = React.useState("2")
   const [tableCols, setTableCols] = React.useState("2")
+  const [insertTableOpen, setInsertTableOpen] = React.useState(false)
+  const [tableOptionsOpen, setTableOptionsOpen] = React.useState(false)
+  const [rowInsertOpen, setRowInsertOpen] = React.useState(false)
+  const [rowDeleteOpen, setRowDeleteOpen] = React.useState(false)
+  const [columnInsertOpen, setColumnInsertOpen] = React.useState(false)
+  const [columnDeleteOpen, setColumnDeleteOpen] = React.useState(false)
+  const [tableSelectionState, setTableSelectionState] = React.useState<TableSelectionState | null>(null)
   const [textColorOpen, setTextColorOpen] = React.useState(false)
   const [highlightColorOpen, setHighlightColorOpen] = React.useState(false)
   const [richTextLinkDialogOpen, setRichTextLinkDialogOpen] = React.useState(false)
@@ -356,6 +524,9 @@ export function SourcesRichTextFullscreenDialog({
   const richTextLinkRangeRef = React.useRef<Range | null>(null)
   const richEditorTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const richEditorVisualRef = React.useRef<HTMLDivElement | null>(null)
+  /** Last caret inside the WYSIWYG editor (toolbar / popovers steal focus from contenteditable). */
+  const richEditorVisualSavedRangeRef = React.useRef<Range | null>(null)
+  const activeTableContextRef = React.useRef<ActiveTableContext | null>(null)
   const fullscreenRichEditorSelectionBridgeRef = React.useRef<FullscreenRichEditorSelectionBridge | null>(null)
   const previousRichTextEditorOpenRef = React.useRef(false)
   const previousRichTextMarkdownModeRef = React.useRef(false)
@@ -364,6 +535,126 @@ export function SourcesRichTextFullscreenDialog({
     () => (markdownMode ? validateMarkdownBestEffort(draft) : null),
     [markdownMode, draft]
   )
+
+  const updateActiveTableSelection = React.useCallback(() => {
+    const visual = richEditorVisualRef.current
+    if (!visual || markdownMode) {
+      activeTableContextRef.current = null
+      setTableSelectionState(null)
+      return
+    }
+    const context = getActiveTableContext(visual)
+    if (!context) {
+      activeTableContextRef.current = null
+      setTableSelectionState(null)
+      return
+    }
+    activeTableContextRef.current = context
+    setTableSelectionState({
+      rowIndex: context.rowIndex,
+      colIndex: context.colIndex,
+      rowCount: context.rowCount,
+      colCount: context.colCount,
+    })
+  }, [markdownMode])
+
+  const clearTablePreview = React.useCallback(() => {
+    const visual = richEditorVisualRef.current
+    if (!visual) return
+    visual.querySelectorAll("[data-table-preview]").forEach((node) => {
+      node.removeAttribute("data-table-preview")
+    })
+  }, [])
+
+  /** Only clear delete/table previews (nested insert popovers render in a portal; parent mouseleave must not strip insert highlights). */
+  const clearDangerTablePreview = React.useCallback(() => {
+    const visual = richEditorVisualRef.current
+    if (!visual) return
+    visual.querySelectorAll("[data-table-preview]").forEach((node) => {
+      if (node.getAttribute("data-table-preview") === "danger") {
+        node.removeAttribute("data-table-preview")
+      }
+    })
+  }, [])
+
+  const previewTableRow = React.useCallback(
+    (targetRowIndex: number) => {
+      clearTablePreview()
+      const context = activeTableContextRef.current
+      if (!context) return
+      const row = context.table.rows[targetRowIndex]
+      if (!row) return
+      Array.from(row.cells).forEach((cell) => {
+        cell.setAttribute("data-table-preview", "danger")
+      })
+    },
+    [clearTablePreview]
+  )
+
+  const previewTableColumn = React.useCallback(
+    (targetColIndex: number) => {
+      clearTablePreview()
+      const context = activeTableContextRef.current
+      if (!context) return
+      Array.from(context.table.rows).forEach((row) => {
+        const cell = row.cells[targetColIndex]
+        if (cell) cell.setAttribute("data-table-preview", "danger")
+      })
+    },
+    [clearTablePreview]
+  )
+
+  const previewTableDelete = React.useCallback(() => {
+    clearTablePreview()
+    const context = activeTableContextRef.current
+    if (!context) return
+    context.table.setAttribute("data-table-preview", "danger")
+  }, [clearTablePreview])
+
+  const previewInsertAnchorRow = React.useCallback(() => {
+    clearTablePreview()
+    const context = activeTableContextRef.current
+    if (!context) return
+    const row = context.table.rows[context.rowIndex]
+    if (!row) return
+    Array.from(row.cells).forEach((cell) => {
+      cell.setAttribute("data-table-preview", "insert-row")
+    })
+  }, [clearTablePreview])
+
+  const previewInsertAnchorColumn = React.useCallback(() => {
+    clearTablePreview()
+    const context = activeTableContextRef.current
+    if (!context) return
+    Array.from(context.table.rows).forEach((row) => {
+      const cell = row.cells[context.colIndex]
+      if (cell) cell.setAttribute("data-table-preview", "insert-col")
+    })
+  }, [clearTablePreview])
+
+  React.useEffect(() => {
+    if (!rowInsertOpen || markdownMode) return undefined
+    previewInsertAnchorRow()
+    return () => {
+      const visual = richEditorVisualRef.current
+      if (!visual) return
+      visual.querySelectorAll("[data-table-preview='insert-row']").forEach((node) => {
+        node.removeAttribute("data-table-preview")
+      })
+    }
+  }, [rowInsertOpen, markdownMode, tableSelectionState?.rowIndex, tableSelectionState?.colIndex, previewInsertAnchorRow])
+
+  React.useEffect(() => {
+    if (!columnInsertOpen || markdownMode) return undefined
+    previewInsertAnchorColumn()
+    return () => {
+      const visual = richEditorVisualRef.current
+      if (!visual) return
+      visual.querySelectorAll("[data-table-preview='insert-col']").forEach((node) => {
+        node.removeAttribute("data-table-preview")
+      })
+    }
+  }, [columnInsertOpen, markdownMode, tableSelectionState?.rowIndex, tableSelectionState?.colIndex, previewInsertAnchorColumn])
 
   /** Radix Dialog mounts the portal after layout; seed WYSIWYG HTML when the node appears. */
   const assignRichEditorVisualRef = React.useCallback(
@@ -406,6 +697,46 @@ export function SourcesRichTextFullscreenDialog({
     })
   }, [markdownMode])
 
+  const toggleStaticRowHighlightAtCaret = React.useCallback(
+    (next: boolean) => {
+      const visual = richEditorVisualRef.current
+      if (!visual || markdownMode) return
+      visual.focus()
+      const context = getActiveTableContext(visual)
+      if (!context) return
+      const row = context.row
+      if (next) row.setAttribute("data-static-row-highlight", "true")
+      else row.removeAttribute("data-static-row-highlight")
+      ensureClickableAnchorsInEditable(visual)
+      setDraft(htmlToMarkdown(visual.innerHTML))
+      flushRichEditorToolbarState()
+      updateActiveTableSelection()
+    },
+    [markdownMode, flushRichEditorToolbarState, updateActiveTableSelection]
+  )
+
+  const toggleStaticColumnHighlightAtCaret = React.useCallback(
+    (next: boolean) => {
+      const visual = richEditorVisualRef.current
+      if (!visual || markdownMode) return
+      visual.focus()
+      const context = getActiveTableContext(visual)
+      if (!context) return
+      const { table, colIndex } = context
+      Array.from(table.rows).forEach((row) => {
+        const cell = row.cells[colIndex]
+        if (!cell) return
+        if (next) cell.setAttribute("data-static-col-highlight", "true")
+        else cell.removeAttribute("data-static-col-highlight")
+      })
+      ensureClickableAnchorsInEditable(visual)
+      setDraft(htmlToMarkdown(visual.innerHTML))
+      flushRichEditorToolbarState()
+      updateActiveTableSelection()
+    },
+    [markdownMode, flushRichEditorToolbarState, updateActiveTableSelection]
+  )
+
   React.useEffect(() => {
     if (markdownMode) setWysiwygToolbarState(DEFAULT_WYSIWYG_TOOLBAR_STATE)
   }, [markdownMode])
@@ -422,6 +753,19 @@ export function SourcesRichTextFullscreenDialog({
       rafId = requestAnimationFrame(() => {
         rafPending = false
         flushRichEditorToolbarState()
+        updateActiveTableSelection()
+        const vis = richEditorVisualRef.current
+        const sel = window.getSelection()
+        if (vis && sel && sel.rangeCount > 0) {
+          const r = sel.getRangeAt(0)
+          if (vis.contains(r.commonAncestorContainer)) {
+            try {
+              richEditorVisualSavedRangeRef.current = r.cloneRange()
+            } catch {
+              richEditorVisualSavedRangeRef.current = null
+            }
+          }
+        }
       })
     }
 
@@ -432,7 +776,7 @@ export function SourcesRichTextFullscreenDialog({
       cancelAnimationFrame(rafId)
       document.removeEventListener("selectionchange", schedule)
     }
-  }, [open, markdownMode, flushRichEditorToolbarState])
+  }, [open, markdownMode, flushRichEditorToolbarState, updateActiveTableSelection])
 
   const openRichTextLinkDialog = React.useCallback(() => {
     const visual = richEditorVisualRef.current
@@ -536,8 +880,43 @@ export function SourcesRichTextFullscreenDialog({
     if (!open) {
       setRichTextLinkDialogOpen(false)
       richTextLinkRangeRef.current = null
+      setInsertTableOpen(false)
+      setTableOptionsOpen(false)
+      setRowInsertOpen(false)
+      setRowDeleteOpen(false)
+      setColumnInsertOpen(false)
+      setColumnDeleteOpen(false)
+      setTableSelectionState(null)
+      activeTableContextRef.current = null
+      richEditorVisualSavedRangeRef.current = null
+      clearTablePreview()
     }
-  }, [open])
+  }, [open, clearTablePreview])
+
+  React.useEffect(() => {
+    if (markdownMode) {
+      setInsertTableOpen(false)
+      setTableOptionsOpen(false)
+      setRowInsertOpen(false)
+      setRowDeleteOpen(false)
+      setColumnInsertOpen(false)
+      setColumnDeleteOpen(false)
+      setTableSelectionState(null)
+      activeTableContextRef.current = null
+      richEditorVisualSavedRangeRef.current = null
+      clearTablePreview()
+    }
+  }, [markdownMode, clearTablePreview])
+
+  React.useEffect(() => {
+    if (!tableOptionsOpen) {
+      setRowInsertOpen(false)
+      setRowDeleteOpen(false)
+      setColumnInsertOpen(false)
+      setColumnDeleteOpen(false)
+      clearTablePreview()
+    }
+  }, [tableOptionsOpen, clearTablePreview])
 
   const runEditorCommand = React.useCallback(
     (command: string) => {
@@ -584,11 +963,23 @@ export function SourcesRichTextFullscreenDialog({
             document.execCommand("formatBlock", false, "h4")
             break
           case "bullet": {
-            insertHtmlAtCursor(visual, '<ul style="list-style-type:disc; margin-left:1.25rem;"><li>item</li></ul>')
+            let savedCaret: Range | null = null
+            try {
+              savedCaret = richEditorVisualSavedRangeRef.current?.cloneRange() ?? null
+            } catch {
+              savedCaret = null
+            }
+            insertHtmlAtCursor(visual, '<ul style="list-style-type:disc; margin-left:1.25rem;"><li>item</li></ul>', savedCaret)
             break
           }
           case "numbered": {
-            insertHtmlAtCursor(visual, '<ol style="list-style-type:decimal; margin-left:1.25rem;"><li>item</li></ol>')
+            let savedCaret: Range | null = null
+            try {
+              savedCaret = richEditorVisualSavedRangeRef.current?.cloneRange() ?? null
+            } catch {
+              savedCaret = null
+            }
+            insertHtmlAtCursor(visual, '<ol style="list-style-type:decimal; margin-left:1.25rem;"><li>item</li></ol>', savedCaret)
             break
           }
           case "align-left":
@@ -609,6 +1000,7 @@ export function SourcesRichTextFullscreenDialog({
         ensureClickableAnchorsInEditable(visual)
         setDraft(htmlToMarkdown(visual.innerHTML))
         flushRichEditorToolbarState()
+        updateActiveTableSelection()
         return
       }
 
@@ -669,7 +1061,7 @@ export function SourcesRichTextFullscreenDialog({
         textarea.setSelectionRange(result.caretStart, result.caretEnd)
       })
     },
-    [markdownMode, draft, flushRichEditorToolbarState]
+    [markdownMode, draft, flushRichEditorToolbarState, updateActiveTableSelection]
   )
 
   const toggleRichTextMode = React.useCallback(() => {
@@ -779,7 +1171,8 @@ export function SourcesRichTextFullscreenDialog({
 
   const addTableMarkdown = React.useCallback(() => {
     if (!markdownMode && richEditorVisualRef.current) {
-      richEditorVisualRef.current.focus()
+      const visual = richEditorVisualRef.current
+      visual.focus()
       const rows = Math.max(1, Number(tableRows) || 1)
       const cols = Math.max(1, Number(tableCols) || 1)
       const html = [
@@ -788,14 +1181,25 @@ export function SourcesRichTextFullscreenDialog({
         ...Array.from({ length: cols }, (_, i) => `<th>Column ${i + 1}</th>`),
         "</tr></thead>",
         "<tbody>",
-        ...Array.from({ length: rows }, () => `<tr>${Array.from({ length: cols }, () => "<td><br /></td>").join("")}</tr>`),
+        ...Array.from(
+          { length: rows },
+          () => `<tr>${Array.from({ length: cols }, () => `<td>${TABLE_CELL_NBSP}</td>`).join("")}</tr>`
+        ),
         "</tbody>",
         "</table>",
       ].join("")
-      document.execCommand("insertHTML", false, html)
-      ensureClickableAnchorsInEditable(richEditorVisualRef.current)
-      setDraft(htmlToMarkdown(richEditorVisualRef.current.innerHTML))
+      let savedCaret: Range | null = null
+      try {
+        savedCaret = richEditorVisualSavedRangeRef.current?.cloneRange() ?? null
+      } catch {
+        savedCaret = null
+      }
+      insertHtmlAtCursor(visual, html, savedCaret)
+      ensureClickableAnchorsInEditable(visual)
+      setDraft(htmlToMarkdown(visual.innerHTML))
       flushRichEditorToolbarState()
+      updateActiveTableSelection()
+      setInsertTableOpen(false)
       return
     }
 
@@ -806,7 +1210,131 @@ export function SourcesRichTextFullscreenDialog({
     const rowTemplate = `| ${Array.from({ length: cols }, () => " ").join(" | ")} |`
     const tableMarkdown = [header, sep, ...Array.from({ length: rows }, () => rowTemplate)].join("\n")
     setDraft((prev) => `${prev}${prev.endsWith("\n") || !prev ? "" : "\n"}${tableMarkdown}\n`)
-  }, [markdownMode, tableRows, tableCols, flushRichEditorToolbarState])
+    setInsertTableOpen(false)
+  }, [markdownMode, tableRows, tableCols, flushRichEditorToolbarState, updateActiveTableSelection])
+
+  const applyVisualTableMutation = React.useCallback(
+    (mutator: (context: ActiveTableContext) => HTMLTableCellElement | null) => {
+      const visual = richEditorVisualRef.current
+      if (!visual || markdownMode) return
+      visual.focus()
+      const context = getActiveTableContext(visual)
+      if (!context) return
+      const focusTarget = mutator(context)
+      if (focusTarget) focusCell(focusTarget)
+      ensureClickableAnchorsInEditable(visual)
+      setDraft(htmlToMarkdown(visual.innerHTML))
+      flushRichEditorToolbarState()
+      updateActiveTableSelection()
+    },
+    [markdownMode, flushRichEditorToolbarState, updateActiveTableSelection]
+  )
+
+  const insertTableRow = React.useCallback(
+    (position: "above" | "below" | "top" | "bottom") => {
+      applyVisualTableMutation((context) => {
+        const insertIndex =
+          position === "above"
+            ? context.rowIndex
+            : position === "below"
+              ? context.rowIndex + 1
+              : position === "top"
+                ? 0
+                : context.table.rows.length
+
+        const newRow = context.table.insertRow(insertIndex)
+        for (let i = 0; i < context.colCount; i += 1) {
+          const cell = document.createElement("td")
+          cell.appendChild(document.createTextNode(TABLE_CELL_NBSP))
+          newRow.appendChild(cell)
+        }
+        return (newRow.cells[Math.min(context.colIndex, newRow.cells.length - 1)] as HTMLTableCellElement | null) ?? null
+      })
+      setTableOptionsOpen(false)
+      setRowInsertOpen(false)
+      clearTablePreview()
+    },
+    [applyVisualTableMutation, clearTablePreview]
+  )
+
+  const insertTableColumn = React.useCallback(
+    (position: "left" | "right" | "start" | "end") => {
+      applyVisualTableMutation((context) => {
+        const insertIndex =
+          position === "left"
+            ? context.colIndex
+            : position === "right"
+              ? context.colIndex + 1
+              : position === "start"
+                ? 0
+                : context.colCount
+
+        let focusedCell: HTMLTableCellElement | null = null
+        Array.from(context.table.rows).forEach((row, rowIndex) => {
+          const tagName = row.parentElement?.tagName === "THEAD" ? "th" : "td"
+          const cell = document.createElement(tagName)
+          cell.appendChild(document.createTextNode(TABLE_CELL_NBSP))
+          if (insertIndex >= row.cells.length) row.appendChild(cell)
+          else row.insertBefore(cell, row.cells[insertIndex])
+          if (rowIndex === context.rowIndex) focusedCell = cell as HTMLTableCellElement
+        })
+        return focusedCell
+      })
+      setTableOptionsOpen(false)
+      setColumnInsertOpen(false)
+      clearTablePreview()
+    },
+    [applyVisualTableMutation, clearTablePreview]
+  )
+
+  const deleteTableRow = React.useCallback((target: RowDeleteTarget) => {
+    applyVisualTableMutation((context) => {
+      const targetRowIndex = resolveRowDeleteIndex(context, target)
+      if (targetRowIndex < 0 || targetRowIndex >= context.rowCount) return context.cell
+      if (context.table.rows.length <= 1) {
+        context.table.remove()
+        return null
+      }
+      const fallbackIndex = Math.max(0, targetRowIndex - 1)
+      context.table.deleteRow(targetRowIndex)
+      const fallbackRow = context.table.rows[Math.min(fallbackIndex, context.table.rows.length - 1)]
+      if (!fallbackRow) return null
+      return (fallbackRow.cells[Math.min(context.colIndex, fallbackRow.cells.length - 1)] as HTMLTableCellElement | null) ?? null
+    })
+    setTableOptionsOpen(false)
+    setRowDeleteOpen(false)
+    clearTablePreview()
+  }, [applyVisualTableMutation, clearTablePreview])
+
+  const deleteTableColumn = React.useCallback((target: ColDeleteTarget) => {
+    applyVisualTableMutation((context) => {
+      const targetColIndex = resolveColumnDeleteIndex(context, target)
+      if (targetColIndex < 0 || targetColIndex >= context.colCount) return context.cell
+      if (context.colCount <= 1) {
+        context.table.remove()
+        return null
+      }
+      Array.from(context.table.rows).forEach((row) => {
+        if (row.cells[targetColIndex]) row.deleteCell(targetColIndex)
+      })
+      const fallbackRow = context.table.rows[Math.min(context.rowIndex, context.table.rows.length - 1)]
+      if (!fallbackRow) return null
+      const fallbackCol = Math.max(0, targetColIndex - 1)
+      return (fallbackRow.cells[Math.min(fallbackCol, fallbackRow.cells.length - 1)] as HTMLTableCellElement | null) ?? null
+    })
+    setTableOptionsOpen(false)
+    setColumnDeleteOpen(false)
+    clearTablePreview()
+  }, [applyVisualTableMutation, clearTablePreview])
+
+  const deleteCurrentTable = React.useCallback(() => {
+    applyVisualTableMutation((context) => {
+      context.table.remove()
+      return null
+    })
+    setTableOptionsOpen(false)
+    clearTablePreview()
+  }, [applyVisualTableMutation, clearTablePreview])
 
   const applyColor = React.useCallback(
     (mode: "color" | "highlight", color: string) => {
@@ -888,6 +1416,7 @@ export function SourcesRichTextFullscreenDialog({
         setPlainTextCaretInRichEditorVisual(el, s, e)
         fullscreenRichEditorSelectionBridgeRef.current = null
       }
+      updateActiveTableSelection()
       return true
     }
 
@@ -921,7 +1450,7 @@ export function SourcesRichTextFullscreenDialog({
       cancelAnimationFrame(raf1)
       cancelAnimationFrame(raf2)
     }
-  }, [open, markdownMode, draft])
+  }, [open, markdownMode, draft, updateActiveTableSelection])
 
   React.useLayoutEffect(() => {
     if (!open || !markdownMode) return
@@ -938,6 +1467,24 @@ export function SourcesRichTextFullscreenDialog({
     ta.setSelectionRange(Math.min(s, e), Math.max(s, e))
     fullscreenRichEditorSelectionBridgeRef.current = null
   }, [open, markdownMode, draft])
+
+  const currentRowStaticHighlighted = React.useMemo(() => {
+    if (markdownMode || !tableSelectionState) return false
+    const visual = richEditorVisualRef.current
+    if (!visual) return false
+    const ctx = getActiveTableContext(visual)
+    if (!ctx) return false
+    return ctx.row.hasAttribute("data-static-row-highlight")
+  }, [markdownMode, tableSelectionState])
+
+  const currentColumnStaticHighlighted = React.useMemo(() => {
+    if (markdownMode || !tableSelectionState) return false
+    const visual = richEditorVisualRef.current
+    if (!visual) return false
+    const ctx = getActiveTableContext(visual)
+    if (!ctx) return false
+    return ctx.cell.hasAttribute("data-static-col-highlight")
+  }, [markdownMode, tableSelectionState])
 
   const column = session?.column ?? "description"
 
@@ -1168,44 +1715,194 @@ export function SourcesRichTextFullscreenDialog({
             <Button size="sm" variant="outline" onClick={() => runEditorCommand("align-justify")} data-rich-editor-control="true">
               <AlignJustify className="h-4 w-4" />
             </Button>
-            <div className="flex items-center gap-1 border rounded-md px-2 py-1">
-              <Table2 className="h-4 w-4 text-muted-foreground" />
-              <Input
-                value={tableRows}
-                onChange={(e) => setTableRows(e.target.value)}
-                className="h-8 w-12 px-1"
-                data-rich-editor-control="true"
-                title="Rows"
-              />
-              <Input
-                value={tableCols}
-                onChange={(e) => setTableCols(e.target.value)}
-                className="h-8 w-12 px-1"
-                data-rich-editor-control="true"
-                title="Columns"
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7"
-                onClick={() => setTableRows((prev) => String(Math.max(1, Number(prev || "1") - 1)))}
-                data-rich-editor-control="true"
-              >
-                <Minus className="h-3 w-3" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-7 w-7"
-                onClick={() => setTableRows((prev) => String(Number(prev || "1") + 1))}
-                data-rich-editor-control="true"
-              >
-                <PlusCircle className="h-3 w-3" />
-              </Button>
-              <Button size="sm" variant="outline" onClick={addTableMarkdown} data-rich-editor-control="true">
-                Insert
-              </Button>
-            </div>
+            <Popover open={insertTableOpen} onOpenChange={setInsertTableOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-rich-editor-control="true"
+                  onMouseDown={(e) => {
+                    if (!markdownMode) e.preventDefault()
+                  }}
+                >
+                  <Table2 className="h-4 w-4 mr-1" />
+                  Insert table
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64">
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">Table size</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="table-rows">Rows</Label>
+                      <Input
+                        id="table-rows"
+                        value={tableRows}
+                        onChange={(e) => setTableRows(e.target.value)}
+                        className="h-8"
+                        data-rich-editor-control="true"
+                        inputMode="numeric"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="table-cols">Columns</Label>
+                      <Input
+                        id="table-cols"
+                        value={tableCols}
+                        onChange={(e) => setTableCols(e.target.value)}
+                        className="h-8"
+                        data-rich-editor-control="true"
+                        inputMode="numeric"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      onClick={addTableMarkdown}
+                      data-rich-editor-control="true"
+                      onMouseDown={(e) => {
+                        if (!markdownMode) e.preventDefault()
+                      }}
+                    >
+                      Insert
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            {!markdownMode && tableSelectionState ? (
+              <Popover open={tableOptionsOpen} onOpenChange={setTableOptionsOpen}>
+                <PopoverTrigger asChild>
+                  <Button size="sm" variant="outline" data-rich-editor-control="true">
+                    Table options
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[430px]">
+                  <div className="space-y-3 text-sm" onMouseLeave={clearDangerTablePreview}>
+                    <div className="text-muted-foreground">
+                      Cell: row {tableSelectionState.rowIndex + 1}/{tableSelectionState.rowCount}, column {tableSelectionState.colIndex + 1}/
+                      {tableSelectionState.colCount}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Toggle
+                        size="sm"
+                        variant="outline"
+                        pressed={currentRowStaticHighlighted}
+                        onPressedChange={toggleStaticRowHighlightAtCaret}
+                        data-rich-editor-control="true"
+                        onMouseDown={(e) => {
+                          if (!markdownMode) e.preventDefault()
+                        }}
+                        aria-label="Highlight row"
+                        title="Pin background on this row, including the header (survives markdown mode and save). Click again to remove."
+                      >
+                        <BetweenVerticalStart className="h-4 w-4" />
+                        Highlight row
+                      </Toggle>
+                      <Toggle
+                        size="sm"
+                        variant="outline"
+                        pressed={currentColumnStaticHighlighted}
+                        onPressedChange={toggleStaticColumnHighlightAtCaret}
+                        data-rich-editor-control="true"
+                        onMouseDown={(e) => {
+                          if (!markdownMode) e.preventDefault()
+                        }}
+                        aria-label="Highlight column"
+                        title="Pin header-style background on this column (stays when you move the caret). Click again to remove."
+                      >
+                        <BetweenHorizontalStart className="h-4 w-4" />
+                        Highlight column
+                      </Toggle>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Popover open={rowInsertOpen} onOpenChange={setRowInsertOpen}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="secondary" data-rich-editor-control="true">
+                            <Rows3 className="h-4 w-4 mr-1" />
+                            Row insert
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64">
+                          <div className="grid gap-1">
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableRow("below")} data-rich-editor-control="true">Under current row</Button>
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableRow("above")} data-rich-editor-control="true">Above current row</Button>
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableRow("bottom")} data-rich-editor-control="true">At bottom</Button>
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableRow("top")} data-rich-editor-control="true">At top</Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+
+                      <Popover open={rowDeleteOpen} onOpenChange={setRowDeleteOpen}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="secondary" data-rich-editor-control="true">
+                            <Rows2 className="h-4 w-4 mr-1" />
+                            Row deletion
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64">
+                          <div className="grid gap-1" onMouseLeave={clearTablePreview}>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" onMouseEnter={() => previewTableRow(tableSelectionState.rowIndex)} onClick={() => deleteTableRow("current")} data-rich-editor-control="true">Delete current row</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" disabled={tableSelectionState.rowIndex <= 0} onMouseEnter={() => previewTableRow(tableSelectionState.rowIndex - 1)} onClick={() => deleteTableRow("above")} data-rich-editor-control="true">Delete row above</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" disabled={tableSelectionState.rowIndex >= tableSelectionState.rowCount - 1} onMouseEnter={() => previewTableRow(tableSelectionState.rowIndex + 1)} onClick={() => deleteTableRow("below")} data-rich-editor-control="true">Delete row below</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" onMouseEnter={() => previewTableRow(0)} onClick={() => deleteTableRow("top")} data-rich-editor-control="true">Delete top row</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" onMouseEnter={() => previewTableRow(tableSelectionState.rowCount - 1)} onClick={() => deleteTableRow("bottom")} data-rich-editor-control="true">Delete bottom row</Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+
+                      <Popover open={columnInsertOpen} onOpenChange={setColumnInsertOpen}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="secondary" data-rich-editor-control="true">
+                            <Columns3 className="h-4 w-4 mr-1" />
+                            Column insert
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64">
+                          <div className="grid gap-1">
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableColumn("right")} data-rich-editor-control="true">Right of current column</Button>
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableColumn("left")} data-rich-editor-control="true">Left of current column</Button>
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableColumn("end")} data-rich-editor-control="true">At right edge</Button>
+                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => insertTableColumn("start")} data-rich-editor-control="true">At left edge</Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+
+                      <Popover open={columnDeleteOpen} onOpenChange={setColumnDeleteOpen}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="secondary" data-rich-editor-control="true">
+                            <Columns2 className="h-4 w-4 mr-1" />
+                            Column deletion
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64">
+                          <div className="grid gap-1" onMouseLeave={clearTablePreview}>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" onMouseEnter={() => previewTableColumn(tableSelectionState.colIndex)} onClick={() => deleteTableColumn("current")} data-rich-editor-control="true">Delete current column</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" disabled={tableSelectionState.colIndex <= 0} onMouseEnter={() => previewTableColumn(tableSelectionState.colIndex - 1)} onClick={() => deleteTableColumn("left")} data-rich-editor-control="true">Delete column left</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" disabled={tableSelectionState.colIndex >= tableSelectionState.colCount - 1} onMouseEnter={() => previewTableColumn(tableSelectionState.colIndex + 1)} onClick={() => deleteTableColumn("right")} data-rich-editor-control="true">Delete column right</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" onMouseEnter={() => previewTableColumn(0)} onClick={() => deleteTableColumn("start")} data-rich-editor-control="true">Delete first column</Button>
+                            <Button size="sm" variant="ghost" className="justify-start text-destructive hover:text-destructive" onMouseEnter={() => previewTableColumn(tableSelectionState.colCount - 1)} onClick={() => deleteTableColumn("end")} data-rich-editor-control="true">Delete last column</Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onMouseEnter={previewTableDelete}
+                        onMouseLeave={clearTablePreview}
+                        onClick={deleteCurrentTable}
+                        data-rich-editor-control="true"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Table deletion
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : null}
             <Button size="sm" variant={markdownMode ? "default" : "outline"} onClick={toggleRichTextMode} data-rich-editor-control="true">
               <FileText className="h-4 w-4 mr-1" />
               Markdown
@@ -1227,13 +1924,26 @@ export function SourcesRichTextFullscreenDialog({
                 <div
                   ref={assignRichEditorVisualRef}
                   contentEditable
-                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_thead]:bg-muted/40 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_td]:align-top [&_td]:min-h-[2rem] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
+                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-transparent [&_th]:border [&_th]:border-border [&_th]:!px-3 [&_th]:!py-3 [&_th]:!min-h-[3rem] [&_th]:text-left [&_th]:font-semibold [&_th]:align-middle [&_th]:leading-normal [&_td]:border [&_td]:border-border [&_td]:!px-3 [&_td]:!py-3 [&_td]:!min-h-[3rem] [&_td]:align-middle [&_td]:leading-normal [&_td]:box-border [&_th]:box-border [&_tbody_tr]:!min-h-[3rem] [&_td[data-table-preview='danger']]:bg-red-500/25 [&_th[data-table-preview='danger']]:bg-red-500/25 [&_table[data-table-preview='danger']_td]:bg-red-500/25 [&_table[data-table-preview='danger']_th]:bg-red-500/25 [&_td[data-table-preview='insert-row']]:bg-blue-500/25 [&_th[data-table-preview='insert-row']]:bg-blue-500/25 [&_td[data-table-preview='insert-col']]:bg-blue-500/25 [&_th[data-table-preview='insert-col']]:bg-blue-500/25 [&_tr[data-static-row-highlight]_td]:!bg-muted/40 [&_tr[data-static-row-highlight]_th]:!bg-muted/40 [&_td[data-static-col-highlight]]:!bg-muted/40 [&_th[data-static-col-highlight]]:!bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
                   style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
+                  onPointerUp={(e) => {
+                    const el = e.currentTarget as HTMLDivElement
+                    const sel = window.getSelection()
+                    if (!sel || sel.rangeCount === 0) return
+                    const r = sel.getRangeAt(0)
+                    if (!el.contains(r.commonAncestorContainer)) return
+                    try {
+                      richEditorVisualSavedRangeRef.current = r.cloneRange()
+                    } catch {
+                      richEditorVisualSavedRangeRef.current = null
+                    }
+                  }}
                   onInput={(e) => {
                     const el = e.currentTarget as HTMLDivElement
                     ensureClickableAnchorsInEditable(el)
                     setDraft(htmlToMarkdown(el.innerHTML))
                     flushRichEditorToolbarState()
+                    updateActiveTableSelection()
                   }}
                   onKeyDown={(e) => handleEditorKeyDown(e as unknown as React.KeyboardEvent<HTMLTextAreaElement>)}
                 />
