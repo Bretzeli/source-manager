@@ -1,15 +1,17 @@
 "use client"
 
 import * as React from "react"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
-import rehypeRaw from "rehype-raw"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { AutoResizeTextarea } from "@/components/auto-resize-textarea"
 import { Expand, FileText, X } from "lucide-react"
 import type { ColumnKey } from "@/types/sources"
-import { prepareRichTextMarkdownForRender, stripAtxHeadingMarkdownInSelection } from "./rich-text-markdown-utils"
+import {
+  markdownToSanitizedRichEditorHtml,
+  RICH_TEXT_MARKDOWN_PREVIEW_LIST_STYLES,
+  RICH_TEXT_MARKDOWN_PREVIEW_TABLE_STYLES,
+  stripAtxHeadingMarkdownInSelection,
+} from "./rich-text-markdown-utils"
 
 const RICH_TEXT_PROSE_LINK_STYLES =
   "[&_a]:cursor-pointer [&_a]:text-primary [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-primary/45 [&_a]:transition-colors hover:[&_a]:decoration-primary hover:[&_a]:text-primary/90 [&_a]:break-all"
@@ -79,11 +81,13 @@ function insertListMarkdownAtSelection(
   const before = value.slice(0, selectionStart)
   const after = value.slice(selectionEnd)
   const needsLineBreakBefore = before.length > 0 && !before.endsWith("\n\n")
+  const prefix = needsLineBreakBefore ? "\n\n" : ""
   const selected = value.slice(selectionStart, selectionEnd).trim()
-  const insertion = `${needsLineBreakBefore ? "\n\n" : ""}${marker} ${selected || "item"}`
+  const body = selected
+  const insertion = `${prefix}${marker} ${body}`
   const nextValue = `${before}${insertion}${after}`
-  const caretPos = before.length + insertion.length
-  return { nextValue, caretStart: caretPos, caretEnd: caretPos }
+  const caretAfterMarkerSpace = before.length + prefix.length + marker.length + 1
+  return { nextValue, caretStart: caretAfterMarkerSpace, caretEnd: caretAfterMarkerSpace + body.length }
 }
 
 type InlineSourceCellEditorProps = {
@@ -101,12 +105,13 @@ type InlineSourceCellEditorProps = {
 
 function renderMarkdownContent(value: string | null | undefined) {
   if (!value) return "-"
+  const html = markdownToSanitizedRichEditorHtml(value)
+  if (!html.trim()) return "-"
   return (
-    <div className={`prose prose-sm max-w-none break-words dark:prose-invert ${RICH_TEXT_PROSE_LINK_STYLES}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-        {prepareRichTextMarkdownForRender(value)}
-      </ReactMarkdown>
-    </div>
+    <div
+      className={`prose prose-sm max-w-none break-words dark:prose-invert ${RICH_TEXT_PROSE_LINK_STYLES} ${RICH_TEXT_MARKDOWN_PREVIEW_LIST_STYLES} ${RICH_TEXT_MARKDOWN_PREVIEW_TABLE_STYLES}`}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 

@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { marked } from "marked"
 import TurndownService from "turndown"
 import { gfm } from "turndown-plugin-gfm"
 import {
@@ -52,7 +51,7 @@ import {
 } from "lucide-react"
 import { PREDEFINED_COLORS } from "./constants"
 import {
-  prepareRichTextMarkdownForRender,
+  markdownToSanitizedRichEditorHtml,
   RICH_TEXT_PROSE_LINK_STYLES,
   stripAtxHeadingMarkdownInSelection,
 } from "./rich-text-markdown-utils"
@@ -105,6 +104,20 @@ const RICH_TEXT_EMPTY_BLOCK_MD = "\n\n\u00a0\n\n"
 
 const turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" })
 turndownService.use(gfm)
+
+/** Nested `ul`/`ol` under `li` → raw HTML so hierarchy survives Markdown round-trip (GFM/Turndown flatten otherwise). */
+turndownService.addRule("nestedListsAsHtml", {
+  filter(node: Node): boolean {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false
+    const el = node as HTMLElement
+    if (el.nodeName !== "UL" && el.nodeName !== "OL") return false
+    return el.parentElement?.nodeName === "LI"
+  },
+  replacement(_content: string, node: Node) {
+    const el = node as HTMLElement
+    return `\n\n${el.outerHTML.trim()}\n\n`
+  },
+})
 
 function isEmptyRichTextBlockForTurndown(node: HTMLElement): boolean {
   const normalized = (node.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim()
@@ -224,43 +237,49 @@ function insertListMarkdownAtSelection(
   const before = value.slice(0, selectionStart)
   const after = value.slice(selectionEnd)
   const needsLineBreakBefore = before.length > 0 && !before.endsWith("\n\n")
+  const prefix = needsLineBreakBefore ? "\n\n" : ""
   const selected = value.slice(selectionStart, selectionEnd).trim()
-  const insertion = `${needsLineBreakBefore ? "\n\n" : ""}${marker} ${selected || "item"}`
+  const body = selected
+  const insertion = `${prefix}${marker} ${body}`
   const nextValue = `${before}${insertion}${after}`
-  const caretPos = before.length + insertion.length
-  return { nextValue, caretStart: caretPos, caretEnd: caretPos }
+  const caretAfterMarkerSpace = before.length + prefix.length + marker.length + 1
+  const caretStart = caretAfterMarkerSpace
+  const caretEnd = caretAfterMarkerSpace + body.length
+  return { nextValue, caretStart, caretEnd }
 }
 
-/** Remove `<br>` in table cells (breaks Turndown → GFM) and keep empty cells as NBSP for stable height. */
-function sanitizeRichEditorTableCells(html: string): string {
-  if (!html.includes("<table")) return html
-  try {
-    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html")
-    const root = doc.body.firstElementChild as HTMLDivElement | null
-    if (!root) return html
-    root.querySelectorAll("td, th").forEach((cell) => {
-      cell.querySelectorAll("br").forEach((br) => {
-        br.parentNode?.removeChild(br)
-      })
-      const text = (cell.textContent || "").replace(/\u00a0/g, " ").trim()
-      if (text === "") cell.textContent = "\u00a0"
-    })
-    root.querySelectorAll("tr[data-user-highlight-row]").forEach((tr) => {
-      tr.removeAttribute("data-user-highlight-row")
-    })
-    root.querySelectorAll("td[data-user-highlight-col], th[data-user-highlight-col]").forEach((cell) => {
-      cell.removeAttribute("data-user-highlight-col")
-    })
-    return root.innerHTML
-  } catch {
-    return html
+const MARKDOWN_LIST_LINE =
+  /^(\s*)((?:[-*+])|(?:\d+\.))(\s+)(.*)$/
+
+function adjustMarkdownListIndentAtCursor(
+  value: string,
+  pos: number,
+  direction: "in" | "out"
+): { nextValue: string; caretStart: number; caretEnd: number } | null {
+  const lineStart = value.lastIndexOf("\n", pos - 1) + 1
+  const nl = value.indexOf("\n", pos)
+  const lineEnd = nl === -1 ? value.length : nl
+  const line = value.slice(lineStart, lineEnd)
+  const m = line.match(MARKDOWN_LIST_LINE)
+  if (!m) return null
+  const ws = m[1] ?? ""
+  const marker = m[2] ?? ""
+  const sp = m[3] ?? " "
+  const rest = m[4] ?? ""
+  let newWs = ws
+  if (direction === "in") {
+    newWs = `${ws}  `
+  } else {
+    if (ws.length >= 2) newWs = ws.slice(0, -2)
+    else return null
   }
+  const newLine = `${newWs}${marker}${sp}${rest}`
+  const nextValue = `${value.slice(0, lineStart)}${newLine}${value.slice(lineEnd)}`
+  const delta = newLine.length - line.length
+  return { nextValue, caretStart: pos + delta, caretEnd: pos + delta }
 }
 
-function markdownToHtml(markdown: string) {
-  const raw = marked.parse(prepareRichTextMarkdownForRender(markdown), { breaks: true, gfm: true }) as string
-  return sanitizeRichEditorTableCells(raw)
-}
+const markdownToHtml = markdownToSanitizedRichEditorHtml
 
 function ensureClickableAnchorsInEditable(root: HTMLElement) {
   root.querySelectorAll("a[href]").forEach((anchor) => {
@@ -350,9 +369,93 @@ function ensureTrailingParagraphAfterOuterTables(root: HTMLElement) {
   })
 }
 
-function finalizeRichEditorVisualDom(root: HTMLDivElement) {
+function finalizeRichEditorVisualDom(root: HTMLDivElement): HTMLElement | null {
   ensureClickableAnchorsInEditable(root)
+  const lastHoisted = hoistOrphanNestedListsIntoPreviousLi(root)
   ensureTrailingParagraphAfterOuterTables(root)
+  return lastHoisted
+}
+
+/**
+ * After hoisting an orphan nested list into the previous `li`, the selection often jumps to the end
+ * of the parent item. Move the caret into the first line of the nested list when that happens.
+ */
+function restoreCaretAfterHoistedNestedList(editor: HTMLElement, hoistedList: HTMLElement) {
+  if (!hoistedList.isConnected || !editor.contains(hoistedList)) return
+  const firstLi = hoistedList.querySelector(":scope > li") as HTMLElement | null
+  if (!firstLi) return
+
+  const sel = window.getSelection()
+  if (!sel) return
+  if (sel.rangeCount > 0 && firstLi.contains(sel.getRangeAt(0).commonAncestorContainer)) return
+
+  const text = (firstLi.textContent || "").replace(/\u00a0/g, " ").trim()
+  const range = document.createRange()
+  const onlyBr =
+    firstLi.childNodes.length === 1 && firstLi.firstChild?.nodeName === "BR"
+
+  if (text === "" || onlyBr) {
+    if (!firstLi.firstChild) firstLi.appendChild(document.createElement("br"))
+    range.setStart(firstLi, 0)
+    range.collapse(true)
+  } else {
+    firstLi.normalize()
+    const walker = document.createTreeWalker(firstLi, NodeFilter.SHOW_TEXT)
+    let lastText: Text | null = null
+    let n = walker.nextNode()
+    while (n) {
+      lastText = n as Text
+      n = walker.nextNode()
+    }
+    if (lastText && lastText.length > 0) {
+      range.setStart(lastText, lastText.length)
+      range.collapse(true)
+    } else {
+      range.selectNodeContents(firstLi)
+      range.collapse(false)
+    }
+  }
+  sel.removeAllRanges()
+  sel.addRange(range)
+}
+
+/**
+ * Browsers often nest lists as `<ul><li>a</li><ul><li>b</li></ul></ul>` (invalid: `ul` as direct
+ * child of `ul`). Turndown then emits two top-level list items and hierarchy is lost on save /
+ * Markdown mode. Hoist orphan lists into the preceding `li` so structure matches what Turndown expects.
+ */
+function hoistOrphanNestedListsIntoPreviousLi(scope: ParentNode): HTMLElement | null {
+  const doc = scope instanceof Document ? scope : scope.ownerDocument ?? document
+  let lastHoisted: HTMLElement | null = null
+  for (let guard = 0; guard < 200; guard += 1) {
+    const orphan = scope.querySelector("ul > ul, ul > ol, ol > ul, ol > ol") as HTMLElement | null
+    if (!orphan) break
+    const host = orphan.parentElement
+    if (!host) break
+    const prev = orphan.previousElementSibling
+    if (prev?.nodeName === "LI") {
+      prev.appendChild(orphan)
+    } else {
+      const li = doc.createElement("li")
+      host.insertBefore(li, orphan)
+      li.appendChild(orphan)
+    }
+    lastHoisted = orphan
+  }
+  return lastHoisted
+}
+
+function normalizeOrphanNestedListsForTurndown(html: string): string {
+  if (!/<\s*(?:ul|ol)\b/i.test(html)) return html
+  try {
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html")
+    const wrap = doc.body.firstElementChild as HTMLDivElement | null
+    if (!wrap) return html
+    hoistOrphanNestedListsIntoPreviousLi(wrap)
+    return wrap.innerHTML
+  } catch {
+    return html
+  }
 }
 
 function htmlToMarkdown(html: string) {
@@ -373,6 +476,7 @@ function htmlToMarkdown(html: string) {
       // keep original
     }
   }
+  cleaned = normalizeOrphanNestedListsForTurndown(cleaned)
   return turndownService.turndown(cleaned).trim()
 }
 
@@ -381,11 +485,18 @@ function isCollapsedAtEditableRootStart(container: HTMLElement, r: Range) {
   return r.startContainer === container && r.startOffset === 0 && container.childNodes.length > 0
 }
 
+type InsertHtmlCaretPlacement = "after-last-node" | "first-li-start"
+
 /**
  * Inserts HTML at a caret. Pass `preferredCaret` (e.g. last selection inside the editor) when the
  * toolbar/popover steals focus — live `getSelection()` is often wrong and can prepend at offset 0.
  */
-function insertHtmlAtCursor(container: HTMLElement, html: string, preferredCaret: Range | null = null) {
+function insertHtmlAtCursor(
+  container: HTMLElement,
+  html: string,
+  preferredCaret: Range | null = null,
+  caretPlacement: InsertHtmlCaretPlacement = "after-last-node"
+) {
   const selection = window.getSelection()
   if (!selection) return
 
@@ -430,13 +541,33 @@ function insertHtmlAtCursor(container: HTMLElement, html: string, preferredCaret
   }
 
   range.insertNode(fragment)
-  if (lastNode) {
-    const newRange = document.createRange()
-    newRange.setStartAfter(lastNode)
-    newRange.collapse(true)
-    selection.removeAllRanges()
-    selection.addRange(newRange)
+  if (!lastNode) return
+
+  if (caretPlacement === "first-li-start" && lastNode.nodeType === Node.ELEMENT_NODE) {
+    const root = lastNode as HTMLElement
+    const li =
+      root.firstElementChild?.tagName === "LI"
+        ? (root.firstElementChild as HTMLLIElement)
+        : root.querySelector("li")
+    if (li) {
+      li.textContent = ""
+      if (li.childNodes.length === 0) {
+        li.appendChild(document.createElement("br"))
+      }
+      const newRange = document.createRange()
+      newRange.setStart(li, 0)
+      newRange.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(newRange)
+      return
+    }
   }
+
+  const newRange = document.createRange()
+  newRange.setStartAfter(lastNode)
+  newRange.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(newRange)
 }
 
 type ActiveTableContext = {
@@ -1069,7 +1200,12 @@ export function SourcesRichTextFullscreenDialog({
             } catch {
               savedCaret = null
             }
-            insertHtmlAtCursor(visual, '<ul style="list-style-type:disc; margin-left:1.25rem;"><li>item</li></ul>', savedCaret)
+            insertHtmlAtCursor(
+              visual,
+              '<ul style="list-style-type:disc;"><li></li></ul>',
+              savedCaret,
+              "first-li-start"
+            )
             break
           }
           case "numbered": {
@@ -1079,7 +1215,12 @@ export function SourcesRichTextFullscreenDialog({
             } catch {
               savedCaret = null
             }
-            insertHtmlAtCursor(visual, '<ol style="list-style-type:decimal; margin-left:1.25rem;"><li>item</li></ol>', savedCaret)
+            insertHtmlAtCursor(
+              visual,
+              '<ol style="list-style-type:decimal;"><li></li></ol>',
+              savedCaret,
+              "first-li-start"
+            )
             break
           }
           case "align-left":
@@ -1210,6 +1351,44 @@ export function SourcesRichTextFullscreenDialog({
 
   const handleEditorKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (markdownMode && e.key === "Tab") {
+        const textarea = richEditorTextareaRef.current
+        if (textarea && textarea.selectionStart === textarea.selectionEnd) {
+          const adjusted = adjustMarkdownListIndentAtCursor(
+            draft,
+            textarea.selectionStart,
+            e.shiftKey ? "out" : "in"
+          )
+          if (adjusted) {
+            e.preventDefault()
+            setDraft(adjusted.nextValue)
+            requestAnimationFrame(() => {
+              textarea.focus()
+              textarea.setSelectionRange(adjusted.caretStart, adjusted.caretEnd)
+            })
+            return
+          }
+        }
+      }
+
+      if (!markdownMode && e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const visual = richEditorVisualRef.current
+        if (visual && !getActiveTableContext(visual)) {
+          const sel = window.getSelection()
+          const anchor = sel?.anchorNode
+          const anchorEl =
+            anchor?.nodeType === Node.ELEMENT_NODE ? (anchor as Element) : anchor?.parentElement ?? null
+          if (anchorEl?.closest("li")) {
+            e.preventDefault()
+            visual.focus()
+            document.execCommand(e.shiftKey ? "outdent" : "indent", false)
+            flushRichEditorToolbarState()
+            updateActiveTableSelection()
+            return
+          }
+        }
+      }
+
       if (markdownMode && e.key === "Enter") {
         const textarea = richEditorTextareaRef.current
         if (textarea) {
@@ -1298,7 +1477,7 @@ export function SourcesRichTextFullscreenDialog({
         runEditorCommand("align-justify")
       }
     },
-    [markdownMode, draft, runEditorCommand, toggleRichTextMode, openRichTextLinkDialog]
+    [markdownMode, draft, runEditorCommand, toggleRichTextMode, openRichTextLinkDialog, flushRichEditorToolbarState, updateActiveTableSelection]
   )
 
   const addTableMarkdown = React.useCallback(() => {
@@ -2064,7 +2243,7 @@ export function SourcesRichTextFullscreenDialog({
                 <div
                   ref={assignRichEditorVisualRef}
                   contentEditable
-                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-transparent [&_th]:border [&_th]:border-border [&_th]:!px-3 [&_th]:!py-3 [&_th]:!min-h-[3rem] [&_th]:text-left [&_th]:font-semibold [&_th]:align-middle [&_th]:leading-normal [&_td]:border [&_td]:border-border [&_td]:!px-3 [&_td]:!py-3 [&_td]:!min-h-[3rem] [&_td]:align-middle [&_td]:leading-normal [&_td]:box-border [&_th]:box-border [&_tbody_tr]:!min-h-[3rem] [&_td[data-table-preview='danger']]:bg-red-500/25 [&_th[data-table-preview='danger']]:bg-red-500/25 [&_table[data-table-preview='danger']_td]:bg-red-500/25 [&_table[data-table-preview='danger']_th]:bg-red-500/25 [&_td[data-table-preview='insert-row']]:bg-blue-500/25 [&_th[data-table-preview='insert-row']]:bg-blue-500/25 [&_td[data-table-preview='insert-col']]:bg-blue-500/25 [&_th[data-table-preview='insert-col']]:bg-blue-500/25 [&_tr[data-static-row-highlight]_td]:!bg-muted/40 [&_tr[data-static-row-highlight]_th]:!bg-muted/40 [&_td[data-static-col-highlight]]:!bg-muted/40 [&_th[data-static-col-highlight]]:!bg-muted/40 outline-none focus:border-muted-foreground/20 focus:ring-1 focus:ring-muted-foreground/12 focus:ring-offset-0`}
+                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li>ul]:mt-1 [&_li>ol]:mt-1 [&_ul_ul]:ml-6 [&_ol_ol]:ml-6 [&_ul_ol]:ml-6 [&_ol_ul]:ml-6 [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-transparent [&_th]:border [&_th]:border-border [&_th]:!px-3 [&_th]:!py-3 [&_th]:!min-h-[3rem] [&_th]:text-left [&_th]:font-semibold [&_th]:align-middle [&_th]:leading-normal [&_td]:border [&_td]:border-border [&_td]:!px-3 [&_td]:!py-3 [&_td]:!min-h-[3rem] [&_td]:align-middle [&_td]:leading-normal [&_td]:box-border [&_th]:box-border [&_tbody_tr]:!min-h-[3rem] [&_td[data-table-preview='danger']]:bg-red-500/25 [&_th[data-table-preview='danger']]:bg-red-500/25 [&_table[data-table-preview='danger']_td]:bg-red-500/25 [&_table[data-table-preview='danger']_th]:bg-red-500/25 [&_td[data-table-preview='insert-row']]:bg-blue-500/25 [&_th[data-table-preview='insert-row']]:bg-blue-500/25 [&_td[data-table-preview='insert-col']]:bg-blue-500/25 [&_th[data-table-preview='insert-col']]:bg-blue-500/25 [&_tr[data-static-row-highlight]_td]:!bg-muted/40 [&_tr[data-static-row-highlight]_th]:!bg-muted/40 [&_td[data-static-col-highlight]]:!bg-muted/40 [&_th[data-static-col-highlight]]:!bg-muted/40 outline-none focus:border-muted-foreground/20 focus:ring-1 focus:ring-muted-foreground/12 focus:ring-offset-0`}
                   style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
                   onPointerUp={(e) => {
                     const el = e.currentTarget as HTMLDivElement
@@ -2080,10 +2259,19 @@ export function SourcesRichTextFullscreenDialog({
                   }}
                   onInput={(e) => {
                     const el = e.currentTarget as HTMLDivElement
-                    finalizeRichEditorVisualDom(el)
+                    const lastHoisted = finalizeRichEditorVisualDom(el)
                     setDraft(htmlToMarkdown(el.innerHTML))
                     flushRichEditorToolbarState()
                     updateActiveTableSelection()
+                    if (lastHoisted) {
+                      queueMicrotask(() => {
+                        requestAnimationFrame(() => {
+                          requestAnimationFrame(() => {
+                            restoreCaretAfterHoistedNestedList(el, lastHoisted)
+                          })
+                        })
+                      })
+                    }
                   }}
                   onKeyDown={(e) => handleEditorKeyDown(e as unknown as React.KeyboardEvent<HTMLTextAreaElement>)}
                 />
