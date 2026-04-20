@@ -1,3 +1,66 @@
+const ATX_HEADING_PREFIX = /^(#{1,6}\s+)/
+
+/**
+ * Strip ATX heading markers (`#` … ` `) from the start of each logical line touched by the selection.
+ * Caret positions are preserved relative to visible text (cursor inside a stripped prefix moves to line start).
+ */
+export function stripAtxHeadingMarkdownInSelection(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number
+): { nextValue: string; caretStart: number; caretEnd: number } {
+  const selStart = Math.min(selectionStart, selectionEnd)
+  const selEnd = Math.max(selectionStart, selectionEnd)
+
+  const a = value.lastIndexOf("\n", selStart - 1) + 1
+
+  let lastIdx = Math.max(selStart, selEnd > 0 ? selEnd - 1 : 0)
+  if (lastIdx < value.length && value[lastIdx] === "\n" && lastIdx > 0) {
+    lastIdx -= 1
+  }
+
+  const nlAfterLast = value.indexOf("\n", lastIdx)
+  const b = nlAfterLast === -1 ? value.length : nlAfterLast
+
+  const segment = value.slice(a, b)
+  const lines = segment.split("\n")
+  const newLines = lines.map((line) => line.replace(ATX_HEADING_PREFIX, ""))
+  const newSegment = newLines.join("\n")
+  const delta = segment.length - newSegment.length
+
+  const mapCaret = (oldCaret: number): number => {
+    if (oldCaret < a) return oldCaret
+    if (oldCaret >= b) return oldCaret - delta
+
+    const rel = oldCaret - a
+    let srcPos = 0
+    let dstPos = 0
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const m = line.match(ATX_HEADING_PREFIX)
+      const headLen = m ? m[1].length : 0
+      const stripped = newLines[i]
+      const nlBetween = i < lines.length - 1 ? 1 : 0
+      const oldLineLen = line.length
+      if (rel <= srcPos + oldLineLen) {
+        const local = rel - srcPos
+        const newLocal = local < headLen ? 0 : local - headLen
+        return a + dstPos + newLocal
+      }
+      srcPos += oldLineLen + nlBetween
+      dstPos += stripped.length + nlBetween
+    }
+    return oldCaret - delta
+  }
+
+  const nextValue = value.slice(0, a) + newSegment + value.slice(b)
+  return {
+    nextValue,
+    caretStart: mapCaret(selectionStart),
+    caretEnd: mapCaret(selectionEnd),
+  }
+}
+
 /** Primary-colored links — aligned with `render-links` and shadcn primary token. */
 export const RICH_TEXT_PROSE_LINK_STYLES =
   "[&_a]:cursor-pointer [&_a]:text-primary [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-primary/45 [&_a]:transition-colors hover:[&_a]:decoration-primary hover:[&_a]:text-primary/90 [&_a]:break-all"

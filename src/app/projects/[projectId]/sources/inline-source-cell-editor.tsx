@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { AutoResizeTextarea } from "@/components/auto-resize-textarea"
 import { Expand, FileText, X } from "lucide-react"
 import type { ColumnKey } from "@/types/sources"
-import { prepareRichTextMarkdownForRender } from "./rich-text-markdown-utils"
+import { prepareRichTextMarkdownForRender, stripAtxHeadingMarkdownInSelection } from "./rich-text-markdown-utils"
 
 const RICH_TEXT_PROSE_LINK_STYLES =
   "[&_a]:cursor-pointer [&_a]:text-primary [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-primary/45 [&_a]:transition-colors hover:[&_a]:decoration-primary hover:[&_a]:text-primary/90 [&_a]:break-all"
@@ -133,6 +133,17 @@ function runInlineMarkdownCommand(command: string, textarea: HTMLTextAreaElement
       result = insertAtSelection(value, start, end, `${"#".repeat(Number(level))} `, "")
       break
     }
+    case "formatNormal": {
+      const stripped = stripAtxHeadingMarkdownInSelection(value, start, end)
+      if (stripped.nextValue !== value) {
+        result = {
+          nextValue: stripped.nextValue,
+          caretStart: Math.min(stripped.caretStart, stripped.caretEnd),
+          caretEnd: Math.max(stripped.caretStart, stripped.caretEnd),
+        }
+      }
+      break
+    }
     case "link":
       result = insertAtSelection(value, start, end, "[", "](https://example.com)")
       break
@@ -189,9 +200,29 @@ function handleInlineEditorKeyDown(
     runInlineMarkdownCommand("underline", textarea, draft, setDraft)
     return
   }
+  if (e.ctrlKey && e.shiftKey && (e.code === "Digit8" || e.key === "*")) {
+    e.preventDefault()
+    runInlineMarkdownCommand("bullet", textarea, draft, setDraft)
+    return
+  }
+  if (e.ctrlKey && e.shiftKey && (e.code === "Digit9" || e.key === "(")) {
+    e.preventDefault()
+    runInlineMarkdownCommand("numbered", textarea, draft, setDraft)
+    return
+  }
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+    e.preventDefault()
+    runInlineMarkdownCommand("link", textarea, draft, setDraft)
+    return
+  }
   if (e.ctrlKey && e.altKey && ["1", "2", "3", "4"].includes(e.key)) {
     e.preventDefault()
     runInlineMarkdownCommand(`h${e.key}`, textarea, draft, setDraft)
+    return
+  }
+  if (e.ctrlKey && e.altKey && (e.key === "0" || e.code === "Numpad0")) {
+    e.preventDefault()
+    runInlineMarkdownCommand("formatNormal", textarea, draft, setDraft)
     return
   }
   if (e.ctrlKey && e.key.toLowerCase() === "m") {
@@ -285,7 +316,7 @@ export function InlineSourceCellEditor({
             autoResize={autoResizeTextarea}
             initialWidth={cellDimensions ? cellDimensions.width - 40 : undefined}
             initialHeight={cellDimensions?.height}
-            className="flex-1"
+            className="flex-1 focus-visible:border-border focus-visible:ring-1 focus-visible:ring-muted-foreground/20 focus-visible:ring-offset-0"
             style={column === "description" || column === "notes" ? { fontSize: `${richTextFontSize}px` } : undefined}
           />
         )}
@@ -337,7 +368,7 @@ export function InlineSourceCellEditor({
           }
         }}
         autoFocus
-        className="h-8"
+        className="h-8 focus-visible:border-border focus-visible:ring-1 focus-visible:ring-muted-foreground/20 focus-visible:ring-offset-0"
       />
     )
 

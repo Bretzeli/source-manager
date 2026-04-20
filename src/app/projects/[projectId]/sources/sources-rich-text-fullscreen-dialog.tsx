@@ -33,10 +33,6 @@ import {
   Bold,
   Italic,
   Underline,
-  Heading1,
-  Heading2,
-  Heading3,
-  Heading4,
   Link2,
   List,
   ListOrdered,
@@ -55,7 +51,11 @@ import {
   BetweenHorizontalStart,
 } from "lucide-react"
 import { PREDEFINED_COLORS } from "./constants"
-import { prepareRichTextMarkdownForRender, RICH_TEXT_PROSE_LINK_STYLES } from "./rich-text-markdown-utils"
+import {
+  prepareRichTextMarkdownForRender,
+  RICH_TEXT_PROSE_LINK_STYLES,
+  stripAtxHeadingMarkdownInSelection,
+} from "./rich-text-markdown-utils"
 
 const RICH_TEXT_FONT_SIZES = ["12", "14", "16", "18", "20", "24"]
 const RICH_TEXT_COLORS = [...PREDEFINED_COLORS.map((color) => color.value), "#ffffff", "#d1d5db", "#f59e0b", "#22c55e", "#0ea5e9", "#8b5cf6", "#ec4899"]
@@ -272,8 +272,108 @@ function ensureClickableAnchorsInEditable(root: HTMLElement) {
   })
 }
 
+const RICH_EDITOR_AFTER_TABLE_ATTR = "data-rich-editor-after-table"
+
+function isOuterDocumentTable(table: HTMLTableElement) {
+  return !table.parentElement?.closest("table")
+}
+
+/** Skip whitespace-only text nodes; return first "significant" sibling or null. */
+function firstSignificantEditorSibling(node: ChildNode | null): ChildNode | null {
+  let n = node
+  while (n) {
+    if (n.nodeType === Node.TEXT_NODE) {
+      const t = (n as Text).data.replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim()
+      if (t !== "") return n
+      n = n.nextSibling
+      continue
+    }
+    return n
+  }
+  return null
+}
+
+function hasMeaningfulRichEditorText(el: HTMLElement) {
+  return (el.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim() !== ""
+}
+
+function needsTrailingParagraphAfterTable(table: HTMLTableElement) {
+  const next = firstSignificantEditorSibling(table.nextSibling)
+  if (!next) return true
+  if (next.nodeType === Node.TEXT_NODE) return false
+  const el = next as HTMLElement
+  if (el.tagName === "TABLE") return true
+  if (el.tagName === "BR") return true
+  if (el.tagName === "P" || el.tagName === "DIV") {
+    if (hasMeaningfulRichEditorText(el)) return false
+    return false
+  }
+  return false
+}
+
+/**
+ * Keeps a caret-friendly block after each top-level table (and between adjacent tables).
+ * Empty synthetic paragraphs are stripped in `htmlToMarkdown` so saves stay clean.
+ */
+function ensureTrailingParagraphAfterOuterTables(root: HTMLElement) {
+  const outerTables = () =>
+    Array.from(root.querySelectorAll("table")).filter((t): t is HTMLTableElement => isOuterDocumentTable(t))
+
+  for (const table of outerTables()) {
+    const next = firstSignificantEditorSibling(table.nextSibling)
+    if (next?.nodeType === Node.ELEMENT_NODE) {
+      const el = next as HTMLElement
+      if (el.tagName === "P" && el.getAttribute(RICH_EDITOR_AFTER_TABLE_ATTR) === "true") {
+        if (!hasMeaningfulRichEditorText(el) && !el.querySelector("br")) {
+          el.appendChild(document.createElement("br"))
+        }
+      }
+    }
+  }
+
+  for (let guard = 0; guard < 24; guard += 1) {
+    let inserted = false
+    for (const table of outerTables()) {
+      if (!needsTrailingParagraphAfterTable(table)) continue
+      const p = document.createElement("p")
+      p.setAttribute(RICH_EDITOR_AFTER_TABLE_ATTR, "true")
+      p.appendChild(document.createElement("br"))
+      table.parentNode?.insertBefore(p, table.nextSibling)
+      inserted = true
+    }
+    if (!inserted) break
+  }
+
+  root.querySelectorAll(`p[${RICH_EDITOR_AFTER_TABLE_ATTR}]`).forEach((node) => {
+    const el = node as HTMLElement
+    if (hasMeaningfulRichEditorText(el)) el.removeAttribute(RICH_EDITOR_AFTER_TABLE_ATTR)
+  })
+}
+
+function finalizeRichEditorVisualDom(root: HTMLDivElement) {
+  ensureClickableAnchorsInEditable(root)
+  ensureTrailingParagraphAfterOuterTables(root)
+}
+
 function htmlToMarkdown(html: string) {
-  return turndownService.turndown(html).trim()
+  let cleaned = html
+  if (cleaned.includes(RICH_EDITOR_AFTER_TABLE_ATTR)) {
+    try {
+      const doc = new DOMParser().parseFromString(`<div>${cleaned}</div>`, "text/html")
+      const wrap = doc.body.firstElementChild as HTMLDivElement | null
+      if (wrap) {
+        wrap.querySelectorAll(`p[${RICH_EDITOR_AFTER_TABLE_ATTR}]`).forEach((p) => {
+          const el = p as HTMLElement
+          const text = (el.textContent || "").replace(/\u00a0/g, " ").replace(/\u200b/g, "").trim()
+          if (text === "" && !el.querySelector("img")) el.remove()
+        })
+        cleaned = wrap.innerHTML
+      }
+    } catch {
+      // keep original
+    }
+  }
+  return turndownService.turndown(cleaned).trim()
 }
 
 function isCollapsedAtEditableRootStart(container: HTMLElement, r: Range) {
@@ -665,7 +765,7 @@ export function SourcesRichTextFullscreenDialog({
       if (!html.trim()) return
       if (!node.textContent?.trim()) {
         node.innerHTML = html
-        ensureClickableAnchorsInEditable(node)
+        finalizeRichEditorVisualDom(node)
       }
     },
     [open, markdownMode, draft]
@@ -707,7 +807,7 @@ export function SourcesRichTextFullscreenDialog({
       const row = context.row
       if (next) row.setAttribute("data-static-row-highlight", "true")
       else row.removeAttribute("data-static-row-highlight")
-      ensureClickableAnchorsInEditable(visual)
+      finalizeRichEditorVisualDom(visual)
       setDraft(htmlToMarkdown(visual.innerHTML))
       flushRichEditorToolbarState()
       updateActiveTableSelection()
@@ -729,7 +829,7 @@ export function SourcesRichTextFullscreenDialog({
         if (next) cell.setAttribute("data-static-col-highlight", "true")
         else cell.removeAttribute("data-static-col-highlight")
       })
-      ensureClickableAnchorsInEditable(visual)
+      finalizeRichEditorVisualDom(visual)
       setDraft(htmlToMarkdown(visual.innerHTML))
       flushRichEditorToolbarState()
       updateActiveTableSelection()
@@ -861,7 +961,7 @@ export function SourcesRichTextFullscreenDialog({
     sel.removeAllRanges()
     sel.addRange(caret)
 
-    ensureClickableAnchorsInEditable(visual)
+    finalizeRichEditorVisualDom(visual)
     setDraft(htmlToMarkdown(visual.innerHTML))
     flushRichEditorToolbarState()
     setRichTextLinkDialogOpen(false)
@@ -997,7 +1097,7 @@ export function SourcesRichTextFullscreenDialog({
           default:
             break
         }
-        ensureClickableAnchorsInEditable(visual)
+        finalizeRichEditorVisualDom(visual)
         setDraft(htmlToMarkdown(visual.innerHTML))
         flushRichEditorToolbarState()
         updateActiveTableSelection()
@@ -1027,6 +1127,17 @@ export function SourcesRichTextFullscreenDialog({
         case "h4": {
           const level = command.replace("h", "")
           result = insertAtSelection(value, start, end, `${"#".repeat(Number(level))} `, "")
+          break
+        }
+        case "formatNormal": {
+          const stripped = stripAtxHeadingMarkdownInSelection(value, start, end)
+          if (stripped.nextValue !== value) {
+            result = {
+              nextValue: stripped.nextValue,
+              caretStart: Math.min(stripped.caretStart, stripped.caretEnd),
+              caretEnd: Math.max(stripped.caretStart, stripped.caretEnd),
+            }
+          }
           break
         }
         case "link":
@@ -1136,9 +1247,30 @@ export function SourcesRichTextFullscreenDialog({
         runEditorCommand("underline")
         return
       }
+      if (e.ctrlKey && e.shiftKey && (e.code === "Digit8" || e.key === "*")) {
+        e.preventDefault()
+        runEditorCommand("bullet")
+        return
+      }
+      if (e.ctrlKey && e.shiftKey && (e.code === "Digit9" || e.key === "(")) {
+        e.preventDefault()
+        runEditorCommand("numbered")
+        return
+      }
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        if (!markdownMode) openRichTextLinkDialog()
+        else void runEditorCommand("link")
+        return
+      }
       if (e.ctrlKey && e.altKey && ["1", "2", "3", "4"].includes(e.key)) {
         e.preventDefault()
         runEditorCommand(`h${e.key}`)
+        return
+      }
+      if (e.ctrlKey && e.altKey && (e.key === "0" || e.code === "Numpad0")) {
+        e.preventDefault()
+        runEditorCommand("formatNormal")
         return
       }
       if (e.ctrlKey && e.key.toLowerCase() === "m") {
@@ -1166,7 +1298,7 @@ export function SourcesRichTextFullscreenDialog({
         runEditorCommand("align-justify")
       }
     },
-    [markdownMode, draft, runEditorCommand, toggleRichTextMode]
+    [markdownMode, draft, runEditorCommand, toggleRichTextMode, openRichTextLinkDialog]
   )
 
   const addTableMarkdown = React.useCallback(() => {
@@ -1195,7 +1327,7 @@ export function SourcesRichTextFullscreenDialog({
         savedCaret = null
       }
       insertHtmlAtCursor(visual, html, savedCaret)
-      ensureClickableAnchorsInEditable(visual)
+      finalizeRichEditorVisualDom(visual)
       setDraft(htmlToMarkdown(visual.innerHTML))
       flushRichEditorToolbarState()
       updateActiveTableSelection()
@@ -1222,7 +1354,7 @@ export function SourcesRichTextFullscreenDialog({
       if (!context) return
       const focusTarget = mutator(context)
       if (focusTarget) focusCell(focusTarget)
-      ensureClickableAnchorsInEditable(visual)
+      finalizeRichEditorVisualDom(visual)
       setDraft(htmlToMarkdown(visual.innerHTML))
       flushRichEditorToolbarState()
       updateActiveTableSelection()
@@ -1347,7 +1479,7 @@ export function SourcesRichTextFullscreenDialog({
         } else {
           document.execCommand("hiliteColor", false, color)
         }
-        ensureClickableAnchorsInEditable(visual)
+        finalizeRichEditorVisualDom(visual)
         setDraft(htmlToMarkdown(visual.innerHTML))
         flushRichEditorToolbarState()
         return
@@ -1373,12 +1505,12 @@ export function SourcesRichTextFullscreenDialog({
   const applyTextType = React.useCallback(
     (type: "normal" | "h1" | "h2" | "h3" | "h4") => {
       if (type === "normal") {
-        if (!markdownMode) runEditorCommand("formatNormal")
+        runEditorCommand("formatNormal")
         return
       }
       runEditorCommand(type)
     },
-    [runEditorCommand, markdownMode]
+    [runEditorCommand]
   )
 
   const save = React.useCallback(() => {
@@ -1406,7 +1538,7 @@ export function SourcesRichTextFullscreenDialog({
       const el = richEditorVisualRef.current
       if (!el || cancelled) return false
       el.innerHTML = markdownToHtml(draft)
-      ensureClickableAnchorsInEditable(el)
+      finalizeRichEditorVisualDom(el)
       const bridge = fullscreenRichEditorSelectionBridgeRef.current
       if (bridge?.kind === "markdown") {
         const mdLen = draft.length
@@ -1577,11 +1709,21 @@ export function SourcesRichTextFullscreenDialog({
                 <SelectValue placeholder="Text type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="h1">Headline 1</SelectItem>
-                <SelectItem value="h2">Headline 2</SelectItem>
-                <SelectItem value="h3">Headline 3</SelectItem>
-                <SelectItem value="h4">Headline 4</SelectItem>
+                <SelectItem value="normal" title="Ctrl+Alt+0">
+                  Normal
+                </SelectItem>
+                <SelectItem value="h1" title="Ctrl+Alt+1">
+                  Headline 1
+                </SelectItem>
+                <SelectItem value="h2" title="Ctrl+Alt+2">
+                  Headline 2
+                </SelectItem>
+                <SelectItem value="h3" title="Ctrl+Alt+3">
+                  Headline 3
+                </SelectItem>
+                <SelectItem value="h4" title="Ctrl+Alt+4">
+                  Headline 4
+                </SelectItem>
               </SelectContent>
             </Select>
             <Button
@@ -1628,64 +1770,8 @@ export function SourcesRichTextFullscreenDialog({
             </Button>
             <Button
               size="sm"
-              type="button"
-              variant={!markdownMode && wysiwygToolbarState.blockTag === "h1" ? "secondary" : "outline"}
-              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h1"}
-              title="Heading 1 (Ctrl+Alt+1)"
-              onMouseDown={(e) => {
-                if (!markdownMode) e.preventDefault()
-              }}
-              onClick={() => runEditorCommand("h1")}
-              data-rich-editor-control="true"
-            >
-              <Heading1 className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant={!markdownMode && wysiwygToolbarState.blockTag === "h2" ? "secondary" : "outline"}
-              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h2"}
-              title="Heading 2 (Ctrl+Alt+2)"
-              onMouseDown={(e) => {
-                if (!markdownMode) e.preventDefault()
-              }}
-              onClick={() => runEditorCommand("h2")}
-              data-rich-editor-control="true"
-            >
-              <Heading2 className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant={!markdownMode && wysiwygToolbarState.blockTag === "h3" ? "secondary" : "outline"}
-              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h3"}
-              title="Heading 3 (Ctrl+Alt+3)"
-              onMouseDown={(e) => {
-                if (!markdownMode) e.preventDefault()
-              }}
-              onClick={() => runEditorCommand("h3")}
-              data-rich-editor-control="true"
-            >
-              <Heading3 className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant={!markdownMode && wysiwygToolbarState.blockTag === "h4" ? "secondary" : "outline"}
-              aria-pressed={!markdownMode && wysiwygToolbarState.blockTag === "h4"}
-              title="Heading 4 (Ctrl+Alt+4)"
-              onMouseDown={(e) => {
-                if (!markdownMode) e.preventDefault()
-              }}
-              onClick={() => runEditorCommand("h4")}
-              data-rich-editor-control="true"
-            >
-              <Heading4 className="h-4 w-4" />
-            </Button>
-            <Button
-              size="sm"
               variant="outline"
-              title="Insert link"
+              title="Insert link (Ctrl+K)"
               onMouseDown={(e) => {
                 if (!markdownMode) e.preventDefault()
               }}
@@ -1697,22 +1783,76 @@ export function SourcesRichTextFullscreenDialog({
             >
               <Link2 className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("bullet")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              variant="outline"
+              title="Bullet list (Ctrl+Shift+8)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("bullet")}
+              data-rich-editor-control="true"
+            >
               <List className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("numbered")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              variant="outline"
+              title="Numbered list (Ctrl+Shift+9)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("numbered")}
+              data-rich-editor-control="true"
+            >
               <ListOrdered className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("align-left")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              variant="outline"
+              title="Align left (Ctrl+Shift+L)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("align-left")}
+              data-rich-editor-control="true"
+            >
               <AlignLeft className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("align-right")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              variant="outline"
+              title="Align right (Ctrl+Shift+R)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("align-right")}
+              data-rich-editor-control="true"
+            >
               <AlignRight className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("align-center")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              variant="outline"
+              title="Align center (Ctrl+Shift+E)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("align-center")}
+              data-rich-editor-control="true"
+            >
               <AlignCenter className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => runEditorCommand("align-justify")} data-rich-editor-control="true">
+            <Button
+              size="sm"
+              variant="outline"
+              title="Justify (Ctrl+Shift+J)"
+              onMouseDown={(e) => {
+                if (!markdownMode) e.preventDefault()
+              }}
+              onClick={() => runEditorCommand("align-justify")}
+              data-rich-editor-control="true"
+            >
               <AlignJustify className="h-4 w-4" />
             </Button>
             <Popover open={insertTableOpen} onOpenChange={setInsertTableOpen}>
@@ -1917,14 +2057,14 @@ export function SourcesRichTextFullscreenDialog({
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => handleEditorKeyDown(e)}
-                  className="font-mono resize-y min-h-[45vh] h-[62vh] max-h-[72vh]"
+                  className="font-mono resize-y min-h-[45vh] h-[62vh] max-h-[72vh] focus-visible:border-border focus-visible:ring-1 focus-visible:ring-muted-foreground/20 focus-visible:ring-offset-0"
                   style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
                 />
               ) : (
                 <div
                   ref={assignRichEditorVisualRef}
                   contentEditable
-                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-transparent [&_th]:border [&_th]:border-border [&_th]:!px-3 [&_th]:!py-3 [&_th]:!min-h-[3rem] [&_th]:text-left [&_th]:font-semibold [&_th]:align-middle [&_th]:leading-normal [&_td]:border [&_td]:border-border [&_td]:!px-3 [&_td]:!py-3 [&_td]:!min-h-[3rem] [&_td]:align-middle [&_td]:leading-normal [&_td]:box-border [&_th]:box-border [&_tbody_tr]:!min-h-[3rem] [&_td[data-table-preview='danger']]:bg-red-500/25 [&_th[data-table-preview='danger']]:bg-red-500/25 [&_table[data-table-preview='danger']_td]:bg-red-500/25 [&_table[data-table-preview='danger']_th]:bg-red-500/25 [&_td[data-table-preview='insert-row']]:bg-blue-500/25 [&_th[data-table-preview='insert-row']]:bg-blue-500/25 [&_td[data-table-preview='insert-col']]:bg-blue-500/25 [&_th[data-table-preview='insert-col']]:bg-blue-500/25 [&_tr[data-static-row-highlight]_td]:!bg-muted/40 [&_tr[data-static-row-highlight]_th]:!bg-muted/40 [&_td[data-static-col-highlight]]:!bg-muted/40 [&_th[data-static-col-highlight]]:!bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`}
+                  className={`border rounded-md p-3 overflow-auto resize-y min-h-[45vh] h-[62vh] max-h-[72vh] prose prose-sm max-w-none dark:prose-invert ${RICH_TEXT_VISUAL_HEADING_CLASSES} ${RICH_TEXT_PROSE_LINK_STYLES} [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-transparent [&_th]:border [&_th]:border-border [&_th]:!px-3 [&_th]:!py-3 [&_th]:!min-h-[3rem] [&_th]:text-left [&_th]:font-semibold [&_th]:align-middle [&_th]:leading-normal [&_td]:border [&_td]:border-border [&_td]:!px-3 [&_td]:!py-3 [&_td]:!min-h-[3rem] [&_td]:align-middle [&_td]:leading-normal [&_td]:box-border [&_th]:box-border [&_tbody_tr]:!min-h-[3rem] [&_td[data-table-preview='danger']]:bg-red-500/25 [&_th[data-table-preview='danger']]:bg-red-500/25 [&_table[data-table-preview='danger']_td]:bg-red-500/25 [&_table[data-table-preview='danger']_th]:bg-red-500/25 [&_td[data-table-preview='insert-row']]:bg-blue-500/25 [&_th[data-table-preview='insert-row']]:bg-blue-500/25 [&_td[data-table-preview='insert-col']]:bg-blue-500/25 [&_th[data-table-preview='insert-col']]:bg-blue-500/25 [&_tr[data-static-row-highlight]_td]:!bg-muted/40 [&_tr[data-static-row-highlight]_th]:!bg-muted/40 [&_td[data-static-col-highlight]]:!bg-muted/40 [&_th[data-static-col-highlight]]:!bg-muted/40 outline-none focus:border-muted-foreground/20 focus:ring-1 focus:ring-muted-foreground/12 focus:ring-offset-0`}
                   style={{ fontSize: `${fontSize}px`, lineHeight: 1.5 }}
                   onPointerUp={(e) => {
                     const el = e.currentTarget as HTMLDivElement
@@ -1940,7 +2080,7 @@ export function SourcesRichTextFullscreenDialog({
                   }}
                   onInput={(e) => {
                     const el = e.currentTarget as HTMLDivElement
-                    ensureClickableAnchorsInEditable(el)
+                    finalizeRichEditorVisualDom(el)
                     setDraft(htmlToMarkdown(el.innerHTML))
                     flushRichEditorToolbarState()
                     updateActiveTableSelection()
