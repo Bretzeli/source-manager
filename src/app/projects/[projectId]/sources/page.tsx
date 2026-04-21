@@ -222,7 +222,7 @@ export default function SourcesPage() {
     return t.sources.columns[key]
   }
 
-  const handleColumnResize = (column: ColumnKey, newWidth: number) => {
+  const handleColumnResize = (column: ColumnKey, newWidth: number, visible: ColumnKey[], keepWidth: boolean) => {
     setColumnWidths((prev) => {
       const currentWidth = prev[column]
       const widthDiff = newWidth - currentWidth
@@ -230,10 +230,10 @@ export default function SourcesPage() {
       const actualNewWidth = Math.max(minWidth, newWidth)
 
       // If keepTableWidth is enabled, adjust the next column
-      if (keepTableWidth) {
-        const columnIndex = visibleColumns.indexOf(column)
-        if (columnIndex >= 0 && columnIndex < visibleColumns.length - 1) {
-          const nextColumn = visibleColumns[columnIndex + 1]
+      if (keepWidth) {
+        const columnIndex = visible.indexOf(column)
+        if (columnIndex >= 0 && columnIndex < visible.length - 1) {
+          const nextColumn = visible[columnIndex + 1]
           const nextColumnWidth = prev[nextColumn]
           const newNextColumnWidth = Math.max(minWidth, nextColumnWidth - widthDiff)
 
@@ -269,21 +269,24 @@ export default function SourcesPage() {
     e.stopPropagation()
     const startX = e.clientX
     const startWidth = columnWidths[column]
+    const visibleSnapshot = visibleColumns
+    const keepWidthSnapshot = keepTableWidth
     let hasMoved = false
 
     setIsResizing(true)
     setHasResized(false)
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (moveEvent: MouseEvent) => {
       hasMoved = true
-      const diff = e.clientX - startX
+      moveEvent.preventDefault()
+      const diff = moveEvent.clientX - startX
       const newWidth = startWidth + diff
-      handleColumnResize(column, newWidth)
+      handleColumnResize(column, newWidth, visibleSnapshot, keepWidthSnapshot)
     }
 
     const handleMouseUp = () => {
-      document.removeEventListener("mousemove", handleMouseMove)
-      document.removeEventListener("mouseup", handleMouseUp)
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", handleMouseUp)
       setIsResizing(false)
       if (hasMoved) {
         setHasResized(true)
@@ -294,8 +297,8 @@ export default function SourcesPage() {
       }
     }
 
-    document.addEventListener("mousemove", handleMouseMove)
-    document.addEventListener("mouseup", handleMouseUp)
+    window.addEventListener("mousemove", handleMouseMove)
+    window.addEventListener("mouseup", handleMouseUp)
   }
 
   const handleHeaderClick = (col: ColumnKey, e: React.MouseEvent) => {
@@ -596,14 +599,14 @@ export default function SourcesPage() {
               )}
             </Button>
           </div>
-          <div className={`border rounded-lg overflow-x-auto ${fullScreen ? "w-screen ml-[calc(-50vw+50%)] mr-[calc(-50vw+50%)]" : ""}`}>
+          <div className={`border rounded-lg ${fullScreen ? "w-screen ml-[calc(-50vw+50%)] mr-[calc(-50vw+50%)]" : ""}`}>
             <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow>
                   {visibleColumns.map((col, index) => (
                     <TableHead
                       key={col}
-                      className={`cursor-pointer select-none relative group ${showColumnSeparators && index < visibleColumns.length - 1 ? "border-r" : ""}`}
+                      className={`cursor-pointer select-none relative group whitespace-normal ${showColumnSeparators && index < visibleColumns.length - 1 ? "border-r" : ""}`}
                       onClick={(e) => handleHeaderClick(col, e)}
                       style={{ width: `${columnWidths[col]}px`, minWidth: `${columnWidths[col]}px`, maxWidth: `${columnWidths[col]}px` }}
                     >
@@ -624,7 +627,10 @@ export default function SourcesPage() {
                       )}
                     </TableHead>
                   ))}
-                  <TableHead className="w-[50px]"></TableHead>
+                  <TableHead
+                    className="w-[50px] whitespace-normal"
+                    style={{ width: "50px", minWidth: "50px", maxWidth: "50px" }}
+                  />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -778,7 +784,7 @@ export default function SourcesPage() {
                           </TableCell>
                         )
                       })}
-                      <TableCell>
+                      <TableCell style={{ width: "50px", minWidth: "50px", maxWidth: "50px" }}>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8">

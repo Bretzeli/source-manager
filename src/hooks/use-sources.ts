@@ -239,21 +239,53 @@ export function useSources() {
     }
   }, [])
 
+  const latestPrefsForSave = useRef({
+    columnVisibility,
+    columnOrder,
+    columnWidths,
+    tagFilter,
+    yearFromFilter,
+    yearToFilter,
+    authorFilter,
+    pageSize,
+    autoResizeTextarea,
+  })
+  latestPrefsForSave.current = {
+    columnVisibility,
+    columnOrder,
+    columnWidths,
+    tagFilter,
+    yearFromFilter,
+    yearToFilter,
+    authorFilter,
+    pageSize,
+    autoResizeTextarea,
+  }
+
+  // Persist immediately when anything except column widths changes. Column widths
+  // update on every resize pixel and must not sync to cookies each frame (janky UI).
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      savePreferences(projectId, {
-        columnVisibility,
-        columnOrder,
-        columnWidths,
-        tagFilter,
-        yearFromFilter,
-        yearToFilter,
-        authorFilter,
-        pageSize,
-        autoResizeTextarea,
-      })
-    }
-  }, [projectId, columnVisibility, columnOrder, columnWidths, tagFilter, yearFromFilter, yearToFilter, authorFilter, pageSize, autoResizeTextarea])
+    if (typeof window === "undefined") return
+    savePreferences(projectId, latestPrefsForSave.current)
+  }, [
+    projectId,
+    columnVisibility,
+    columnOrder,
+    tagFilter,
+    yearFromFilter,
+    yearToFilter,
+    authorFilter,
+    pageSize,
+    autoResizeTextarea,
+  ])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const id = window.setTimeout(() => {
+      savePreferences(projectId, latestPrefsForSave.current)
+    }, 350)
+    return () => window.clearTimeout(id)
+  }, [projectId, columnWidths])
 
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
 
