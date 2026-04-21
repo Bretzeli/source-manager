@@ -65,6 +65,7 @@ const translations = {
     oauth: {
       continueWith: "Continue with",
       github: "GitHub",
+      google: "Google",
       atlassian: "Atlassian",
     },
     errors: {
@@ -357,6 +358,7 @@ const translations = {
     oauth: {
       continueWith: "Weiter mit",
       github: "GitHub",
+      google: "Google",
       atlassian: "Atlassian",
     },
     errors: {
