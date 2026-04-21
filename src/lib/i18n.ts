@@ -67,7 +67,6 @@ const translations = {
       github: "GitHub",
       microsoft: "Microsoft",
       atlassian: "Atlassian",
-      additionalMethods: "Additional login methods can be added later",
     },
     errors: {
       required: "This field is required",
@@ -361,7 +360,6 @@ const translations = {
       github: "GitHub",
       microsoft: "Microsoft",
       atlassian: "Atlassian",
-      additionalMethods: "Zusätzliche Anmeldemethoden können später hinzugefügt werden",
     },
     errors: {
       required: "Dieses Feld ist erforderlich",

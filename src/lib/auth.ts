@@ -3,7 +3,6 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "./db";
 import { username } from "better-auth/plugins/username";
 import { oneTimeToken } from "better-auth/plugins/one-time-token";
-import { genericOAuth } from "better-auth/plugins/generic-oauth";
 
 if (!process.env.BETTER_AUTH_SECRET) {
   throw new Error("BETTER_AUTH_SECRET environment variable is not set");
@@ -11,6 +10,13 @@ if (!process.env.BETTER_AUTH_SECRET) {
 
 if (!process.env.BETTER_AUTH_URL) {
   throw new Error("BETTER_AUTH_URL environment variable is not set");
+}
+
+/** Atlassian 3LO scopes (space-separated). Must match what is enabled under Permissions → User identity API. */
+function atlassianOAuthScopes(): string[] {
+  const raw = process.env.ATLASSIAN_OAUTH_SCOPES?.trim()
+  if (raw) return raw.split(/\s+/).filter(Boolean)
+  return ["read:me"]
 }
 
 export const auth = betterAuth({
@@ -53,6 +59,20 @@ export const auth = betterAuth({
           },
         }
       : {}),
+    ...(process.env.ATLASSIAN_CLIENT_ID && process.env.ATLASSIAN_CLIENT_SECRET
+      ? {
+          atlassian: {
+            clientId: process.env.ATLASSIAN_CLIENT_ID,
+            clientSecret: process.env.ATLASSIAN_CLIENT_SECRET,
+            // Skip default read:jira-user (Jira site). Use User Identity only — see ATLASSIAN_OAUTH_SCOPES.
+            // Atlassian still maps OAuth to "sites"; accounts with no Cloud site may see
+            // "User identity site ... create a site" until you add a free Cloud product to that account.
+            disableDefaultScope: true,
+            scope: atlassianOAuthScopes(),
+            prompt: "consent",
+          },
+        }
+      : {}),
   },
   plugins: [
     username({
@@ -62,32 +82,6 @@ export const auth = betterAuth({
     // One-time token plugin for password reset with email
     oneTimeToken({
       expiresIn: 15, 
-    }),
-    // Atlassian OAuth - using generic OAuth plugin
-    genericOAuth({
-      config: [
-        {
-          providerId: "atlassian",
-          clientId: process.env.ATLASSIAN_CLIENT_ID || "",
-          clientSecret: process.env.ATLASSIAN_CLIENT_SECRET || "",
-          scopes: ["read:user", "offline_access"],
-          authorizationUrl: "https://auth.atlassian.com/authorize",
-          tokenUrl: "https://auth.atlassian.com/oauth/token",
-          userInfoUrl: "https://api.atlassian.com/me",
-          authorizationUrlParams: {
-            audience: "api.atlassian.com",
-            prompt: "consent",
-          },
-          mapProfileToUser: (profile: Record<string, unknown>) => {
-            return {
-              id: (profile.account_id as string) || (profile.id as string),
-              name: (profile.name as string) || (profile.displayName as string),
-              email: profile.email as string,
-              image: (profile.picture as string) || (profile.avatar_url as string),
-            };
-          },
-        },
-      ],
     }),
   ],
   advanced: {
