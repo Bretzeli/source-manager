@@ -10,23 +10,6 @@ import { useAuthModal } from "@/contexts/auth-modal-context"
 import { useTranslations } from "@/lib/i18n"
 import { authClient } from "@/lib/auth-client"
 
-// Microsoft icon component (SVG)
-function MicrosoftIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 23 23"
-      fill="currentColor"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M0 0h11v11H0z" />
-      <path d="M12 0h11v11H12z" />
-      <path d="M0 12h11v11H0z" />
-      <path d="M12 12h11v11H12z" />
-    </svg>
-  )
-}
-
 // Atlassian icon component (SVG)
 function AtlassianIcon({ className }: { className?: string }) {
   return (
@@ -41,7 +24,7 @@ function AtlassianIcon({ className }: { className?: string }) {
   )
 }
 
-type OAuthProviderId = "github" | "microsoft" | "atlassian"
+type OAuthProviderId = "github" | "atlassian"
 
 type OAuthProviderConfig = {
   id: OAuthProviderId
@@ -146,12 +129,6 @@ export function AuthModal({ fullyCover: propFullyCover }: AuthModalProps) {
       name: t.oauth.github,
       icon: Github,
       bgClass: "bg-[#24292e] hover:bg-[#24292e]/90 dark:bg-[#24292e] dark:hover:bg-[#24292e]/90 text-white",
-    },
-    {
-      id: "microsoft",
-      name: t.oauth.microsoft,
-      icon: MicrosoftIcon,
-      bgClass: "bg-[#0078d4] hover:bg-[#0078d4]/90 dark:bg-[#0078d4] dark:hover:bg-[#0078d4]/90 text-white",
     },
     {
       id: "atlassian",
