@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Moon, Sun, User, LogOut, LogIn, Settings } from "lucide-react"
+import { avatarImageProps } from "@/lib/external-avatar-url"
 import { Button } from "@/components/ui/button"
 import {
   Breadcrumb,
@@ -196,7 +197,7 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src={session?.user?.image || undefined} />
+                  <AvatarImage {...avatarImageProps(session?.user?.image ?? null)} />
                   <AvatarFallback>
                     {getInitials(session?.user?.name, session?.user?.email)}
                   </AvatarFallback>

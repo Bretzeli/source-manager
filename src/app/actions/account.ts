@@ -7,9 +7,11 @@ import { and, eq, inArray, ne } from "drizzle-orm"
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { auth } from "@/lib/auth"
 import { reconcileDisplayPreferencesAfterUnlink } from "@/lib/display-profile"
+import { listPublicAvatarUrls } from "@/lib/public-avatars-server"
+import { sanitizePresetAvatarUrl } from "@/lib/public-avatars-shared"
 import { db } from "@/lib/db"
 import { account, oauthAccountIdentity, user as userTable } from "@/lib/db/schema"
-import { upsertOAuthIdentity } from "@/lib/oauth-account-identity"
+import { readOAuthProfileFromAccountRecord, upsertOAuthIdentity } from "@/lib/oauth-account-identity"
 
 const ACCOUNT_DELETE_REAUTH_COOKIE = "account_delete_reauth"
 const ACCOUNT_DELETE_REAUTH_PURPOSE = "delete-account"
@@ -145,6 +147,7 @@ function extractImageFromAccountInfo(info: unknown): string | null {
       : null
 
   const candidates: unknown[] = [
+    (payload as Record<string, unknown>).picture,
     userPart?.image,
     userPart?.picture,
     userPart?.avatar_url,
@@ -168,6 +171,24 @@ function extractImageFromAccountInfo(info: unknown): string | null {
   return null
 }
 
+async function resolveOAuthAccountProfileImageUrl(
+  entry: { id: string },
+  accountInfoPayload: unknown,
+): Promise<string | null> {
+  const fromInfo = extractImageFromAccountInfo(accountInfoPayload)
+  if (fromInfo) return fromInfo
+  const [row] = await db
+    .select({ idToken: account.idToken })
+    .from(account)
+    .where(eq(account.id, entry.id))
+    .limit(1)
+  const { image } = readOAuthProfileFromAccountRecord({
+    id: entry.id,
+    idToken: row?.idToken ?? null,
+  })
+  return image
+}
+
 export type DisplayImageOption = {
   accountId: string
   providerId: string
@@ -180,12 +201,15 @@ export async function getDisplayInformationSettings() {
 
   await getOAuthLoginSettings()
 
+  const presetAvatarUrls = await listPublicAvatarUrls()
+
   const [urow] = await db
     .select({
       name: userTable.name,
       email: userTable.email,
       displayEmail: userTable.displayEmail,
       displayImageAccountId: userTable.displayImageAccountId,
+      image: userTable.image,
     })
     .from(userTable)
     .where(eq(userTable.id, ownerUserId))
@@ -194,6 +218,11 @@ export async function getDisplayInformationSettings() {
   if (!urow) {
     throw new Error("Unauthorized")
   }
+
+  const selectedPresetAvatarUrl =
+    !urow.displayImageAccountId && urow.image && presetAvatarUrls.includes(urow.image)
+      ? urow.image
+      : null
 
   const rows = await db
     .select({
@@ -206,13 +235,37 @@ export async function getDisplayInformationSettings() {
     .innerJoin(account, eq(account.id, oauthAccountIdentity.accountId))
     .where(and(eq(account.userId, ownerUserId), ne(account.providerId, "credential")))
 
-  const emailChoices = [...new Set(rows.map((r) => r.email.toLowerCase()))]
+  const missingProfileIds = rows.filter((r) => !r.profileImageUrl).map((r) => r.accountId)
+  let imageRows = rows
+  if (missingProfileIds.length > 0) {
+    const tokRows = await db
+      .select({ id: account.id, idToken: account.idToken })
+      .from(account)
+      .where(inArray(account.id, missingProfileIds))
+    const tokMap = new Map(tokRows.map((t) => [t.id, t.idToken]))
+    imageRows = await Promise.all(
+      rows.map(async (r) => {
+        if (r.profileImageUrl) return r
+        const image = readOAuthProfileFromAccountRecord({
+          id: r.accountId,
+          idToken: tokMap.get(r.accountId) ?? null,
+        }).image
+        if (image) {
+          await upsertOAuthIdentity(r.accountId, r.email, image)
+          return { ...r, profileImageUrl: image }
+        }
+        return r
+      }),
+    )
+  }
+
+  const emailChoices = [...new Set(imageRows.map((r) => r.email.toLowerCase()))]
   if (urow.email) {
     emailChoices.push(urow.email.toLowerCase())
   }
   const uniqueEmails = [...new Set(emailChoices)].sort()
 
-  const imageOptions: DisplayImageOption[] = rows.map((r) => ({
+  const imageOptions: DisplayImageOption[] = imageRows.map((r) => ({
     accountId: r.accountId,
     providerId: r.providerId,
     email: r.email,
@@ -230,6 +283,8 @@ export async function getDisplayInformationSettings() {
     emailChoices: uniqueEmails,
     imageOptions,
     displayImageAccountId: urow.displayImageAccountId,
+    presetAvatarUrls,
+    selectedPresetAvatarUrl,
   }
 }
 
@@ -237,6 +292,7 @@ export async function updateDisplayInformation(params: {
   displayName: string
   displayEmail: string
   displayImageAccountId: string | null
+  presetAvatarUrl: string | null
 }) {
   const userId = await requireSessionUserId()
 
@@ -273,6 +329,7 @@ export async function updateDisplayInformation(params: {
   const displayEmailCol =
     primary?.email && emailNorm === primary.email.toLowerCase() ? null : emailNorm
 
+  const allowedPresets = await listPublicAvatarUrls()
   let nextDisplayImageAccountId: string | null = params.displayImageAccountId
   let nextUserImage: string | null = null
 
@@ -287,9 +344,29 @@ export async function updateDisplayInformation(params: {
       .where(eq(oauthAccountIdentity.accountId, params.displayImageAccountId))
       .limit(1)
     nextUserImage = imgRow?.url ?? null
+    if (!nextUserImage) {
+      const [tokRow] = await db
+        .select({ idToken: account.idToken })
+        .from(account)
+        .where(eq(account.id, params.displayImageAccountId))
+        .limit(1)
+      nextUserImage =
+        readOAuthProfileFromAccountRecord({
+          id: params.displayImageAccountId,
+          idToken: tokRow?.idToken ?? null,
+        }).image ?? null
+    }
+    const identityEmail = identityRows.find((r) => r.accountId === params.displayImageAccountId)?.email
+    if (identityEmail && nextUserImage) {
+      await upsertOAuthIdentity(params.displayImageAccountId, identityEmail, nextUserImage)
+    }
   } else {
     nextDisplayImageAccountId = null
-    nextUserImage = null
+    const sanitized = sanitizePresetAvatarUrl(params.presetAvatarUrl ?? null, allowedPresets)
+    if (params.presetAvatarUrl && !sanitized) {
+      throw new Error("INVALID_PRESET_AVATAR")
+    }
+    nextUserImage = sanitized
   }
 
   await db
@@ -338,12 +415,19 @@ export async function getOAuthLoginSettings() {
               headers: await headers(),
               query: { accountId: entry.accountId },
             })
-            const resolvedImage = extractImageFromAccountInfo(info)
+            const resolvedImage = await resolveOAuthAccountProfileImageUrl(entry, info)
             if (resolvedImage) {
               await upsertOAuthIdentity(entry.id, row.email, resolvedImage)
             }
           } catch {
-            /* keep stored email */
+            try {
+              const resolvedImage = await resolveOAuthAccountProfileImageUrl(entry, null)
+              if (resolvedImage) {
+                await upsertOAuthIdentity(entry.id, row.email, resolvedImage)
+              }
+            } catch {
+              /* keep stored email */
+            }
           }
         }
         return {
@@ -359,7 +443,7 @@ export async function getOAuthLoginSettings() {
         })
         const resolvedEmail = extractEmailFromAccountInfo(info)
         if (resolvedEmail) {
-          const resolvedImage = extractImageFromAccountInfo(info)
+          const resolvedImage = await resolveOAuthAccountProfileImageUrl(entry, info)
           await upsertOAuthIdentity(entry.id, resolvedEmail, resolvedImage ?? undefined)
           return {
             ...entry,
@@ -384,9 +468,9 @@ export async function getOAuthLoginSettings() {
           headers: await headers(),
           query: { accountId: entry.accountId },
         })
-        fallbackImage = extractImageFromAccountInfo(info)
+        fallbackImage = await resolveOAuthAccountProfileImageUrl(entry, info)
       } catch {
-        /* */
+        fallbackImage = await resolveOAuthAccountProfileImageUrl(entry, null)
       }
       await upsertOAuthIdentity(entry.id, fallbackEmail, fallbackImage ?? undefined)
       return {

@@ -22,6 +22,8 @@ import { useAuthModal } from "@/contexts/auth-modal-context"
 import { useTranslations } from "@/lib/i18n"
 import authClient from "@/lib/auth-client"
 import { ProviderIcon, type OAuthProviderId } from "@/components/oauth-provider-icons"
+import { getPresetAvatarDisplayLabel } from "@/data/avatar-preset-display-names"
+import { avatarImageProps } from "@/lib/external-avatar-url"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -57,7 +59,7 @@ const DISPLAY_IMAGE_DEFAULT = "__default__"
 type AccountSection = "oauth" | "display" | "delete"
 
 export default function AccountSettingsClient() {
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
   const router = useRouter()
   const { openModal } = useAuthModal()
   const { data: session, isPending, refetch: refetchSession } = useSession()
@@ -92,6 +94,7 @@ export default function AccountSettingsClient() {
   const [displayImageOptions, setDisplayImageOptions] = useState<
     Array<{ accountId: string; providerId: string; email: string; imageUrl: string | null }>
   >([])
+  const [presetAvatarUrls, setPresetAvatarUrls] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -193,8 +196,11 @@ export default function AccountSettingsClient() {
         setDisplayEmail(data.displayEmail)
         setDisplayEmailChoices(data.emailChoices)
         setDisplayImageOptions(data.imageOptions)
+        setPresetAvatarUrls(data.presetAvatarUrls ?? [])
         setDisplayImageChoice(
-          data.displayImageAccountId ?? DISPLAY_IMAGE_DEFAULT,
+          data.displayImageAccountId ??
+            data.selectedPresetAvatarUrl ??
+            DISPLAY_IMAGE_DEFAULT,
         )
       } catch {
         if (!cancelled) {
@@ -403,11 +409,13 @@ export default function AccountSettingsClient() {
   const handleSaveDisplayInformation = async () => {
     try {
       setDisplaySaving(true)
+      const isDefault = displayImageChoice === DISPLAY_IMAGE_DEFAULT
+      const isPreset = !isDefault && presetAvatarUrls.includes(displayImageChoice)
       await updateDisplayInformation({
         displayName,
         displayEmail,
-        displayImageAccountId:
-          displayImageChoice === DISPLAY_IMAGE_DEFAULT ? null : displayImageChoice,
+        displayImageAccountId: !isDefault && !isPreset ? displayImageChoice : null,
+        presetAvatarUrl: isPreset ? displayImageChoice : null,
       })
       toast.success(t.account.displayInformation.savedToast)
       await refetchSession?.()
@@ -419,6 +427,8 @@ export default function AccountSettingsClient() {
         toast.error(t.account.displayInformation.invalidEmailToast)
       } else if (error instanceof Error && error.message === "INVALID_DISPLAY_IMAGE") {
         toast.error(t.account.displayInformation.invalidImageToast)
+      } else if (error instanceof Error && error.message === "INVALID_PRESET_AVATAR") {
+        toast.error(t.account.displayInformation.invalidPresetAvatarToast)
       } else {
         toast.error(error instanceof Error ? error.message : t.errors.generic)
       }
@@ -580,6 +590,26 @@ export default function AccountSettingsClient() {
                           {t.account.displayInformation.defaultAvatarLabel}
                         </span>
                       </button>
+                      {presetAvatarUrls.map((url) => (
+                        <button
+                          key={url}
+                          type="button"
+                          className="flex flex-col items-center gap-2 rounded-md p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => setDisplayImageChoice(url)}
+                        >
+                          <span
+                            className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 bg-muted ${
+                              displayImageChoice === url ? "border-primary" : "border-transparent"
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={url} alt="" className="h-full w-full object-cover" />
+                          </span>
+                          <span className="text-xs text-center max-w-[5.5rem] leading-tight break-all">
+                            {getPresetAvatarDisplayLabel(url, locale)}
+                          </span>
+                        </button>
+                      ))}
                       {displayImageOptions.map((option) => (
                         <button
                           key={option.accountId}
@@ -597,7 +627,7 @@ export default function AccountSettingsClient() {
                             {option.imageUrl ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
-                                src={option.imageUrl}
+                                {...avatarImageProps(option.imageUrl)}
                                 alt=""
                                 className="h-full w-full object-cover"
                               />

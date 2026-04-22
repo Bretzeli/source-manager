@@ -120,7 +120,8 @@ const translations = {
         displayEmailLabel: "Email shown in the app",
         displayEmailHint: "Pick from addresses linked to your OAuth providers.",
         displayImageLabel: "Profile picture",
-        displayImageHint: "Use a provider avatar or the default icon.",
+        displayImageHint:
+          "Use the default icon, any image file placed in public/avatars (shown automatically), or a linked provider avatar.",
         defaultAvatarLabel: "Default icon",
         saveAction: "Save display settings",
         saving: "Saving...",
@@ -128,6 +129,7 @@ const translations = {
         invalidNameToast: "Please enter a display name.",
         invalidEmailToast: "That email is not linked to your account.",
         invalidImageToast: "That profile picture option is not available.",
+        invalidPresetAvatarToast: "That built-in avatar is not available or was removed from the server.",
       },
       delete: {
         menuItem: "Delete account",
@@ -537,7 +539,8 @@ const translations = {
         displayEmailLabel: "In der App angezeigte E-Mail",
         displayEmailHint: "Wähle aus den Adressen, die mit deinen OAuth-Anbietern verknüpft sind.",
         displayImageLabel: "Profilbild",
-        displayImageHint: "Nutze ein Anbieter-Avatar oder das Standard-Symbol.",
+        displayImageHint:
+          "Nutze das Standard-Symbol, eine Bilddatei in public/avatars (wird automatisch angezeigt) oder ein verknüpftes Anbieter-Avatar.",
         defaultAvatarLabel: "Standard-Symbol",
         saveAction: "Anzeige-Einstellungen speichern",
         saving: "Wird gespeichert...",
@@ -545,6 +548,8 @@ const translations = {
         invalidNameToast: "Bitte gib einen Anzeigenamen ein.",
         invalidEmailToast: "Diese E-Mail ist mit deinem Konto nicht verknüpft.",
         invalidImageToast: "Diese Profilbild-Option ist nicht verfügbar.",
+        invalidPresetAvatarToast:
+          "Dieser eingebaute Avatar ist nicht verfügbar oder wurde vom Server entfernt.",
       },
       delete: {
         menuItem: "Konto löschen",
