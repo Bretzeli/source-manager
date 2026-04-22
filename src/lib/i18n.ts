@@ -66,6 +66,7 @@ const translations = {
       continueWith: "Continue with",
       github: "GitHub",
       google: "Google",
+      discord: "Discord",
       atlassian: "Atlassian",
     },
     errors: {
@@ -359,6 +360,7 @@ const translations = {
       continueWith: "Weiter mit",
       github: "GitHub",
       google: "Google",
+      discord: "Discord",
       atlassian: "Atlassian",
     },
     errors: {
