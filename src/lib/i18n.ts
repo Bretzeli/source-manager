@@ -44,6 +44,110 @@ const translations = {
       creating: "Creating...",
       createCard: "Create a new project",
     },
+    account: {
+      title: "Account Settings",
+      description: "Manage your account access and security.",
+      loginRequiredTitle: "Login required",
+      loginRequiredDescription: "Please log in to manage your account settings.",
+      oauth: {
+        menuItem: "OAuth",
+        title: "OAuth Login",
+        description: "Manage linked OAuth providers and linking behavior.",
+        reauthDescription:
+          "For security reasons, please verify by logging in again before you can manage OAuth providers.",
+        reauthAction: "Re-login to verify",
+        reauthing: "Preparing re-login...",
+        reauthRequiredHint: "Re-login is required before changing OAuth settings.",
+        reauthRequiredToast: "Please re-login before changing OAuth settings.",
+        preventCrossProviderTitle: "Prevent automatic cross-provider linking",
+        preventCrossProviderDescription:
+          "If enabled, signing in with a different OAuth provider for the same email is blocked unless accounts are linked manually here.",
+        providerPolicySavedToast: "OAuth provider policy updated.",
+        linkedProvidersTitle: "Linked OAuth providers",
+        loadingProviders: "Loading linked providers...",
+        noLinkedProviders: "No OAuth providers linked yet.",
+        unlinkAction: "Unlink",
+        unlinkedToast: "OAuth provider unlinked.",
+        lastProviderError: "At least one OAuth provider must stay linked to this account.",
+        lastProviderHint: "You can only unlink providers while at least one linked provider remains.",
+        linkProvidersTitle: "Link another OAuth provider",
+        allProvidersLinked: "All available OAuth providers are already linked.",
+        linkWarning:
+          "If the OAuth account you are linking already exists separately, that existing account data will be permanently deleted after you complete ownership verification.",
+        linkConfirmTitle: "Link OAuth provider",
+        linkConfirmDescription:
+          "To continue, confirm that any existing account tied to this OAuth login may be deleted permanently during the linking process.",
+        linkConfirmPhraseLabel: "Type {phrase} to continue:",
+        linkConfirmPhraseError: "Please type {phrase} to confirm linking.",
+        linkAction: "Link provider",
+        linking: "Linking...",
+        crossProviderDisabledError:
+          "Only one account is allowed per mail address and you have disabled automatic cross-provider linking in your account settings.",
+        accountAlreadyLinkedError:
+          "This OAuth account is already linked to a different user. Please sign in with that account first if you want to merge.",
+        accountNotLinkedForProviderError:
+          "Linking this provider is currently not allowed. Please verify provider email permissions and try again.",
+        linkConflictTitle: "Resolve OAuth account conflict",
+        linkConflictRuleAllDeleted:
+          "The old account only uses this email address. It will be deleted, and all links for this email will move to your current account.",
+        linkConflictKeepMessage:
+          "The old account will be kept. Only links for the moved email will be transferred to your current account.",
+        linkConflictKeepLinksTitle: "The old account keeps these linked provider/email combinations:",
+        linkConflictRulePartialKeep:
+          "If the old account also has links with a different email, only links for this email will be moved. The old account remains with its other email links.",
+        linkConflictConfirmPhraseLabel: "Type {phrase} to continue:",
+        linkConflictConfirmPhraseError: "Please type {phrase} to confirm.",
+        linkConflictConfirmAction: "Continue and re-login",
+        linkConflictContinueAction: "Continue",
+        linkConflictDeleteAction: "Continue and delete",
+        linkConflictReauthToast:
+          "Please log in with the conflicting provider account to complete the merge.",
+        mergeCompletedDeletedSourceToast:
+          "OAuth links were moved. The old account was deleted. Please log in again.",
+        mergeCompletedRetainedSourceToast:
+          "OAuth links for this email were moved. The old account remains with other email links.",
+        conflictCouldNotBeResolvedError:
+          "We could not determine the conflicting account automatically. Please sign in once with the conflicting account and try again.",
+      },
+      displayInformation: {
+        menuItem: "Display information",
+        title: "Display information",
+        description: "Choose how your name, email, and profile picture appear in the app.",
+        loading: "Loading display settings...",
+        displayNameLabel: "Display name",
+        displayNameHint:
+          "When you first sign up with a provider, this is prefilled from your provider profile (or from the part before @ in your email if no name is provided). You can change it any time.",
+        displayEmailLabel: "Email shown in the app",
+        displayEmailHint: "Pick from addresses linked to your OAuth providers.",
+        displayImageLabel: "Profile picture",
+        displayImageHint: "Use a provider avatar or the default icon.",
+        defaultAvatarLabel: "Default icon",
+        saveAction: "Save display settings",
+        saving: "Saving...",
+        savedToast: "Display settings saved.",
+        invalidNameToast: "Please enter a display name.",
+        invalidEmailToast: "That email is not linked to your account.",
+        invalidImageToast: "That profile picture option is not available.",
+      },
+      delete: {
+        menuItem: "Delete account",
+        title: "Delete account",
+        description: "Permanently remove your account and all related data from the server.",
+        scope: "This includes your profile, sessions, projects, sources, citations, tags, and linked OAuth accounts.",
+        reauthDescription: "For security reasons, please verify by logging in again before you can delete your account.",
+        reauthAction: "Re-login to verify",
+        reauthing: "Preparing re-login...",
+        reauthRequiredToast: "Please re-login and try deleting your account again.",
+        confirmPhraseLabel: "Type {phrase} to confirm:",
+        confirmPhraseError: "Please type DELETE to confirm account deletion.",
+        action: "Delete account permanently",
+        confirmAction: "Yes, delete my account",
+        dialogTitle: "Delete account permanently?",
+        dialogDescription: "This action cannot be undone. All associated data and OAuth links will be deleted.",
+        deleting: "Deleting account...",
+        deletedToast: "Account deleted successfully.",
+      },
+    },
     login: {
       title: "Login",
       email: "Email",
@@ -68,6 +172,23 @@ const translations = {
       google: "Google",
       discord: "Discord",
       atlassian: "Atlassian",
+    },
+    authError: {
+      unableToLinkTitle: "Sign-in could not be completed",
+      unableToLinkIntro:
+        "The provider could not be linked to your account. This often happens when automatic cross-provider linking is turned off in Account Settings, and you already use another OAuth provider with the same email address.",
+      unableToLinkWhatYouCanDo: "What you can do",
+      unableToLinkOptionA:
+        "Sign in again using a provider you have already linked to this account, then add the new provider from Account → Settings → OAuth if you want both.",
+      unableToLinkOptionB:
+        "Or turn off “Prevent automatic cross-provider linking” in Account Settings if you want future sign-ins with another provider (same email) to attach automatically.",
+      signInAgain: "Back to sign in",
+      goHome: "Go to home",
+      accountSettings: "Open account settings",
+      genericTitle: "Something went wrong",
+      genericDescription:
+        "We could not finish authentication. You can try signing in again from the home page.",
+      codeLabel: "Error code",
     },
     errors: {
       required: "This field is required",
@@ -338,6 +459,112 @@ const translations = {
       creating: "Wird erstellt...",
       createCard: "Neues Projekt erstellen",
     },
+    account: {
+      title: "Kontoeinstellungen",
+      description: "Verwalte den Zugriff und die Sicherheit deines Kontos.",
+      loginRequiredTitle: "Anmeldung erforderlich",
+      loginRequiredDescription: "Bitte melde dich an, um deine Kontoeinstellungen zu verwalten.",
+      oauth: {
+        menuItem: "OAuth",
+        title: "OAuth-Login",
+        description: "Verwalte verknüpfte OAuth-Anbieter und das Verknüpfungsverhalten.",
+        reauthDescription:
+          "Aus Sicherheitsgründen musst du dich erneut anmelden, bevor du OAuth-Anbieter verwalten kannst.",
+        reauthAction: "Erneut anmelden zur Verifizierung",
+        reauthing: "Anmeldung wird vorbereitet...",
+        reauthRequiredHint: "Erneute Anmeldung ist erforderlich, bevor du OAuth-Einstellungen ändern kannst.",
+        reauthRequiredToast: "Bitte melde dich erneut an, bevor du OAuth-Einstellungen änderst.",
+        preventCrossProviderTitle: "Automatische providerübergreifende Verknüpfung verhindern",
+        preventCrossProviderDescription:
+          "Wenn aktiviert, wird die Anmeldung mit einem anderen OAuth-Anbieter bei derselben E-Mail blockiert, außer Konten werden hier manuell verknüpft.",
+        providerPolicySavedToast: "OAuth-Anbieter-Richtlinie wurde aktualisiert.",
+        linkedProvidersTitle: "Verknüpfte OAuth-Anbieter",
+        loadingProviders: "Verknüpfte Anbieter werden geladen...",
+        noLinkedProviders: "Es sind noch keine OAuth-Anbieter verknüpft.",
+        unlinkAction: "Trennen",
+        unlinkedToast: "OAuth-Anbieter wurde getrennt.",
+        lastProviderError: "Mindestens ein OAuth-Anbieter muss mit diesem Konto verknüpft bleiben.",
+        lastProviderHint:
+          "Du kannst Anbieter nur trennen, solange mindestens ein verknüpfter Anbieter verbleibt.",
+        linkProvidersTitle: "Weiteren OAuth-Anbieter verknüpfen",
+        allProvidersLinked: "Alle verfügbaren OAuth-Anbieter sind bereits verknüpft.",
+        linkWarning:
+          "Wenn das zu verknüpfende OAuth-Konto bereits separat existiert, werden dessen Kontodaten nach erfolgreicher Eigentumsbestätigung dauerhaft gelöscht.",
+        linkConfirmTitle: "OAuth-Anbieter verknüpfen",
+        linkConfirmDescription:
+          "Bestätige zum Fortfahren, dass ein bestehendes Konto für diesen OAuth-Login während der Verknüpfung dauerhaft gelöscht werden kann.",
+        linkConfirmPhraseLabel: "Gib {phrase} ein, um fortzufahren:",
+        linkConfirmPhraseError: "Bitte gib {phrase} ein, um die Verknüpfung zu bestätigen.",
+        linkAction: "Anbieter verknüpfen",
+        linking: "Wird verknüpft...",
+        crossProviderDisabledError:
+          "Pro E-Mail-Adresse ist nur ein Konto erlaubt und du hast die automatische providerübergreifende Verknüpfung in den Kontoeinstellungen deaktiviert.",
+        accountAlreadyLinkedError:
+          "Dieses OAuth-Konto ist bereits mit einem anderen Benutzer verknüpft. Melde dich zuerst mit diesem Konto an, wenn du zusammenführen möchtest.",
+        accountNotLinkedForProviderError:
+          "Das Verknüpfen dieses Anbieters ist derzeit nicht erlaubt. Prüfe die E-Mail-Berechtigungen des Anbieters und versuche es erneut.",
+        linkConflictTitle: "OAuth-Konto-Konflikt lösen",
+        linkConflictRuleAllDeleted:
+          "Das alte Konto nutzt nur diese E-Mail-Adresse. Es wird gelöscht, und alle Verknüpfungen für diese E-Mail werden in dein aktuelles Konto verschoben.",
+        linkConflictKeepMessage:
+          "Das alte Konto bleibt bestehen. Nur Verknüpfungen für die verschobene E-Mail werden in dein aktuelles Konto übertragen.",
+        linkConflictKeepLinksTitle:
+          "Das alte Konto behält diese verknüpften Anbieter-/E-Mail-Kombinationen:",
+        linkConflictRulePartialKeep:
+          "Wenn das alte Konto zusätzlich Verknüpfungen mit einer anderen E-Mail hat, werden nur Verknüpfungen für diese E-Mail verschoben. Das alte Konto bleibt mit den anderen E-Mail-Verknüpfungen bestehen.",
+        linkConflictConfirmPhraseLabel: "Gib {phrase} ein, um fortzufahren:",
+        linkConflictConfirmPhraseError: "Bitte gib {phrase} zur Bestätigung ein.",
+        linkConflictConfirmAction: "Fortfahren und erneut anmelden",
+        linkConflictContinueAction: "Fortfahren",
+        linkConflictDeleteAction: "Fortfahren und löschen",
+        linkConflictReauthToast:
+          "Bitte melde dich mit dem konfliktierenden Provider-Konto an, um das Zusammenführen abzuschließen.",
+        mergeCompletedDeletedSourceToast:
+          "OAuth-Verknüpfungen wurden verschoben. Das alte Konto wurde gelöscht. Bitte melde dich erneut an.",
+        mergeCompletedRetainedSourceToast:
+          "OAuth-Verknüpfungen für diese E-Mail wurden verschoben. Das alte Konto bleibt mit anderen E-Mail-Verknüpfungen bestehen.",
+        conflictCouldNotBeResolvedError:
+          "Das konfliktierende Konto konnte nicht automatisch ermittelt werden. Melde dich einmal mit dem konfliktierenden Konto an und versuche es erneut.",
+      },
+      displayInformation: {
+        menuItem: "Anzeigeinformationen",
+        title: "Anzeigeinformationen",
+        description: "Lege fest, wie Name, E-Mail und Profilbild in der App angezeigt werden.",
+        loading: "Anzeige-Einstellungen werden geladen...",
+        displayNameLabel: "Anzeigename",
+        displayNameHint:
+          "Bei der ersten Anmeldung mit einem Anbieter wird dies aus dem Anbieterprofil übernommen (oder aus dem Teil vor dem @ in deiner E-Mail, falls kein Name vorliegt). Du kannst es jederzeit ändern.",
+        displayEmailLabel: "In der App angezeigte E-Mail",
+        displayEmailHint: "Wähle aus den Adressen, die mit deinen OAuth-Anbietern verknüpft sind.",
+        displayImageLabel: "Profilbild",
+        displayImageHint: "Nutze ein Anbieter-Avatar oder das Standard-Symbol.",
+        defaultAvatarLabel: "Standard-Symbol",
+        saveAction: "Anzeige-Einstellungen speichern",
+        saving: "Wird gespeichert...",
+        savedToast: "Anzeige-Einstellungen wurden gespeichert.",
+        invalidNameToast: "Bitte gib einen Anzeigenamen ein.",
+        invalidEmailToast: "Diese E-Mail ist mit deinem Konto nicht verknüpft.",
+        invalidImageToast: "Diese Profilbild-Option ist nicht verfügbar.",
+      },
+      delete: {
+        menuItem: "Konto löschen",
+        title: "Konto löschen",
+        description: "Entfernt dein Konto und alle zugehörigen Daten dauerhaft vom Server.",
+        scope: "Dazu gehören Profil, Sitzungen, Projekte, Quellen, Zitate, Tags und verknüpfte OAuth-Konten.",
+        reauthDescription: "Aus Sicherheitsgründen musst du dich erneut anmelden, bevor du dein Konto löschen kannst.",
+        reauthAction: "Erneut anmelden zur Verifizierung",
+        reauthing: "Anmeldung wird vorbereitet...",
+        reauthRequiredToast: "Bitte melde dich erneut an und versuche die Kontolöschung danach erneut.",
+        confirmPhraseLabel: "Gib {phrase} zur Bestätigung ein:",
+        confirmPhraseError: "Bitte gib DELETE ein, um die Kontolöschung zu bestätigen.",
+        action: "Konto dauerhaft löschen",
+        confirmAction: "Ja, mein Konto löschen",
+        dialogTitle: "Konto dauerhaft löschen?",
+        dialogDescription: "Diese Aktion kann nicht rückgängig gemacht werden. Alle zugehörigen Daten und OAuth-Verknüpfungen werden gelöscht.",
+        deleting: "Konto wird gelöscht...",
+        deletedToast: "Konto erfolgreich gelöscht.",
+      },
+    },
     login: {
       title: "Anmelden",
       email: "E-Mail",
@@ -362,6 +589,23 @@ const translations = {
       google: "Google",
       discord: "Discord",
       atlassian: "Atlassian",
+    },
+    authError: {
+      unableToLinkTitle: "Anmeldung konnte nicht abgeschlossen werden",
+      unableToLinkIntro:
+        "Der Anbieter konnte nicht mit deinem Konto verknüpft werden. Das passiert oft, wenn die automatische providerübergreifende Verknüpfung in den Kontoeinstellungen deaktiviert ist und du bereits einen anderen OAuth-Anbieter mit derselben E-Mail-Adresse nutzt.",
+      unableToLinkWhatYouCanDo: "Was du tun kannst",
+      unableToLinkOptionA:
+        "Melde dich erneut mit einem Anbieter an, der bereits mit diesem Konto verknüpft ist, und füge den neuen Anbieter bei Bedarf unter Konto → Einstellungen → OAuth hinzu.",
+      unableToLinkOptionB:
+        "Oder deaktiviere die Option „Automatische providerübergreifende Verknüpfung verhindern“ in den Kontoeinstellungen, wenn zukünftige Anmeldungen mit einem anderen Anbieter (gleiche E-Mail) automatisch verknüpft werden sollen.",
+      signInAgain: "Zur Anmeldung",
+      goHome: "Zur Startseite",
+      accountSettings: "Kontoeinstellungen öffnen",
+      genericTitle: "Etwas ist schiefgelaufen",
+      genericDescription:
+        "Die Authentifizierung konnte nicht abgeschlossen werden. Versuche es erneut über die Anmeldung auf der Startseite.",
+      codeLabel: "Fehlercode",
     },
     errors: {
       required: "Dieses Feld ist erforderlich",

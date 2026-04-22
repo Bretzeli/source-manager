@@ -9,6 +9,11 @@ import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 import { getInstallationToken, getInstallationRepositories } from "@/lib/github-app"
 
+function sessionUserId(session: { user?: { id?: unknown } } | null | undefined): string | null {
+  const id = session?.user?.id
+  return typeof id === "string" && id ? id : null
+}
+
 export async function getProjects() {
   const session = await auth.api.getSession({ headers: await headers() })
   
@@ -16,10 +21,15 @@ export async function getProjects() {
     return []
   }
 
+  const uid = sessionUserId(session)
+  if (!uid) {
+    return []
+  }
+
   const userProjects = await db
     .select()
     .from(projects)
-    .where(eq(projects.ownerId, session.user.id))
+    .where(eq(projects.ownerId, uid))
     .orderBy(desc(projects.lastEditedAt))
 
   return userProjects
@@ -38,7 +48,7 @@ export async function getProject(projectId: string) {
     .where(eq(projects.id, projectId))
     .limit(1)
 
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     return null
   }
 
@@ -62,7 +72,7 @@ export async function createProject(formData: FormData) {
   const [newProject] = await db
     .insert(projects)
     .values({
-      ownerId: session.user.id,
+      ownerId: session!.user!.id as string,
       title: title.trim(),
       description: description?.trim() || null,
     })
@@ -86,7 +96,7 @@ export async function deleteProject(projectId: string) {
     .where(eq(projects.id, projectId))
     .limit(1)
 
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
 
@@ -153,7 +163,7 @@ export async function fetchGithubRepoFiles(repoUrl: string, projectId?: string) 
         .where(eq(projects.id, projectId))
         .limit(1)
       
-      if (project && project.ownerId === session.user.id && project.githubAccountId) {
+      if (project && project.ownerId === session!.user!.id as string && project.githubAccountId) {
         // Get the GitHub account linked to this project
         const [githubAccount] = await db
           .select()
@@ -299,7 +309,7 @@ export async function updateProjectGithubRepo(
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
   
@@ -342,7 +352,7 @@ export async function unlinkProjectGithubRepo(projectId: string) {
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
   
@@ -377,7 +387,7 @@ export async function disconnectGithubAccount(projectId: string) {
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
   
@@ -413,7 +423,7 @@ export async function hasGithubConnection(projectId: string): Promise<boolean> {
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  return !!(project && project.ownerId === session.user.id && project.githubAccountId)
+  return !!(project && project.ownerId === session!.user!.id as string && project.githubAccountId)
 }
 
 /**
@@ -429,7 +439,7 @@ export async function getUserGithubAccounts() {
   const accounts = await db
     .select()
     .from(githubAccounts)
-    .where(eq(githubAccounts.userId, session.user.id))
+    .where(eq(githubAccounts.userId, session!.user!.id as string))
     .orderBy(desc(githubAccounts.isPrimary), desc(githubAccounts.createdAt))
   
   return accounts.map((acc) => ({
@@ -458,7 +468,7 @@ export async function getLoggedInGithubAccount() {
     .from(account)
     .where(
       and(
-        eq(account.userId, session.user.id),
+        eq(account.userId, session!.user!.id as string),
         eq(account.providerId, "github")
       )
     )
@@ -500,7 +510,7 @@ export async function getGithubRepositories(projectId: string) {
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
   
@@ -564,7 +574,7 @@ export async function syncExistingGithubInstallation(projectId: string, installa
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
 
@@ -614,7 +624,7 @@ export async function syncExistingGithubInstallation(projectId: string, installa
       .from(account)
       .where(
         and(
-          eq(account.userId, session.user.id),
+          eq(account.userId, session!.user!.id as string),
           eq(account.providerId, "github")
         )
       )
@@ -624,7 +634,7 @@ export async function syncExistingGithubInstallation(projectId: string, installa
     const [created] = await db
       .insert(githubAccounts)
       .values({
-        userId: session.user.id,
+        userId: session!.user!.id as string,
         accountId: githubAccount?.id || null,
         githubUsername,
         installationId,
@@ -666,7 +676,7 @@ export async function getProjectInstallationId(projectId: string): Promise<strin
     .where(eq(projects.id, projectId))
     .limit(1)
 
-  if (!project || project.ownerId !== session.user.id || !project.githubAccountId) {
+  if (!project || project.ownerId !== session!.user!.id as string || !project.githubAccountId) {
     return null
   }
 
@@ -696,7 +706,7 @@ export async function updateProjectGithubAccount(projectId: string, githubAccoun
     .where(eq(projects.id, projectId))
     .limit(1)
   
-  if (!project || project.ownerId !== session.user.id) {
+  if (!project || project.ownerId !== session!.user!.id as string) {
     throw new Error("Project not found or unauthorized")
   }
   
@@ -708,7 +718,7 @@ export async function updateProjectGithubAccount(projectId: string, githubAccoun
       .where(
         and(
           eq(githubAccounts.id, githubAccountId),
-          eq(githubAccounts.userId, session.user.id)
+          eq(githubAccounts.userId, session!.user!.id as string)
         )
       )
       .limit(1)

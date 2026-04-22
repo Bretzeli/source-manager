@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "allow_different_providers" boolean DEFAULT true NOT NULL;

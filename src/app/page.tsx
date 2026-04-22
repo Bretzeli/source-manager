@@ -82,6 +82,16 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, sessionPending])
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("signIn") !== "1") return
+    openModal("login", false)
+    params.delete("signIn")
+    const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`
+    window.history.replaceState({}, "", next)
+  }, [openModal])
+
   const handleCreateProject = async (formData: FormData) => {
     try {
       setCreating(true)

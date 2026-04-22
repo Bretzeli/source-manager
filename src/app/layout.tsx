@@ -7,6 +7,7 @@ import { ProjectProvider } from "@/contexts/project-context";
 import { AuthModal } from "@/components/auth-modal";
 import { Toaster } from "@/components/ui/sonner";
 import { Navbar } from "@/components/navbar";
+import { AccountSettingsReauthClear } from "@/components/account-settings-reauth-clear";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,6 +37,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AuthModalProvider>
             <ProjectProvider>
+              <AccountSettingsReauthClear />
               <Navbar />
               {children}
               <AuthModal />

@@ -6,7 +6,12 @@ export const user = pgTable("user", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
+  allowDifferentProviders: boolean("allow_different_providers").default(true).notNull(),
   image: text("image"),
+  /** Shown in the UI; when null, `email` is used. Must match a linked provider identity email when set. */
+  displayEmail: text("display_email"),
+  /** When set, profile image is taken from `oauth_account_identity.profile_image_url` for this account row. */
+  displayImageAccountId: text("display_image_account_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
@@ -59,6 +64,25 @@ export const account = pgTable(
   (table) => [index("account_userId_idx").on(table.userId)],
 );
 
+export const oauthAccountIdentity = pgTable(
+  "oauth_account_identity",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .unique()
+      .references(() => account.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    profileImageUrl: text("profile_image_url"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [index("oauth_account_identity_email_idx").on(table.email)],
+);
+
 export const verification = pgTable(
   "verification",
   {
@@ -91,6 +115,17 @@ export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, {
     fields: [account.userId],
     references: [user.id],
+  }),
+  oauthIdentity: one(oauthAccountIdentity, {
+    fields: [account.id],
+    references: [oauthAccountIdentity.accountId],
+  }),
+}));
+
+export const oauthAccountIdentityRelations = relations(oauthAccountIdentity, ({ one }) => ({
+  account: one(account, {
+    fields: [oauthAccountIdentity.accountId],
+    references: [account.id],
   }),
 }));
 
