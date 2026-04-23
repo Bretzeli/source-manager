@@ -82,6 +82,49 @@ export async function createProject(formData: FormData) {
   return newProject
 }
 
+export async function updateProjectData(
+  projectId: string,
+  title: string,
+  description: string | null
+) {
+  const session = await auth.api.getSession({ headers: await headers() })
+
+  if (!session?.user) {
+    throw new Error("Unauthorized")
+  }
+
+  const trimmedTitle = title.trim()
+  if (!trimmedTitle) {
+    throw new Error("Title is required")
+  }
+
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
+  if (!project || project.ownerId !== (session!.user!.id as string)) {
+    throw new Error("Project not found or unauthorized")
+  }
+
+  const [updatedProject] = await db
+    .update(projects)
+    .set({
+      title: trimmedTitle,
+      description: description?.trim() || null,
+    })
+    .where(eq(projects.id, projectId))
+    .returning()
+
+  revalidatePath("/")
+  revalidatePath(`/projects/${projectId}/settings`)
+  revalidatePath(`/projects/${projectId}/sources`)
+  revalidatePath(`/projects/${projectId}/citations`)
+
+  return updatedProject
+}
+
 export async function deleteProject(projectId: string) {
   const session = await auth.api.getSession({ headers: await headers() })
   

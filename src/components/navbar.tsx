@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { Moon, Sun, User, LogOut, LogIn, Settings } from "lucide-react"
+import { Moon, Sun, User, LogOut, LogIn, Settings, Menu } from "lucide-react"
 import { avatarImageProps } from "@/lib/external-avatar-url"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,7 +34,7 @@ import { useTranslations, type Locale } from "@/lib/i18n"
 import { useSession, signOut } from "@/lib/auth-client"
 import { useAuthModal } from "@/contexts/auth-modal-context"
 import { getProject } from "@/app/actions/projects"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useProjectContext } from "@/contexts/project-context"
 
 interface NavbarProps {
@@ -50,6 +50,11 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
   const { openModal } = useAuthModal()
   const { projectId: contextProjectId, projectName: contextProjectName } = useProjectContext()
   const [mounted, setMounted] = useState(false)
+  const [showCompactProjectNav, setShowCompactProjectNav] = useState(false)
+  const navContentRef = useRef<HTMLDivElement | null>(null)
+  const leftSectionRef = useRef<HTMLDivElement | null>(null)
+  const centerNavRef = useRef<HTMLDivElement | null>(null)
+  const rightSectionRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -84,6 +89,59 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
   const currentProjectName = projectName || (contextProjectId === currentProjectId ? contextProjectName : undefined) || fetchedProjectName
   const isProjectPage = currentProjectId !== undefined
   const isAuthenticated = !!session?.user
+  const projectNavItems = currentProjectId
+    ? [
+        { href: `/projects/${currentProjectId}/sources`, label: t.nav.sources },
+        { href: `/projects/${currentProjectId}/citations`, label: t.nav.citations },
+        { href: `/projects/${currentProjectId}/settings`, label: t.nav.settings },
+      ]
+    : []
+
+  useEffect(() => {
+    if (!isProjectPage || !currentProjectId) {
+      setShowCompactProjectNav(false)
+      return
+    }
+
+    const updateNavMode = () => {
+      const navContent = navContentRef.current
+      const leftSection = leftSectionRef.current
+      const centerNav = centerNavRef.current
+      const rightSection = rightSectionRef.current
+      if (!navContent || !leftSection || !centerNav || !rightSection) return
+
+      const navRect = navContent.getBoundingClientRect()
+      const leftRect = leftSection.getBoundingClientRect()
+      const centerRect = centerNav.getBoundingClientRect()
+      const rightRect = rightSection.getBoundingClientRect()
+
+      // Keep a small buffer so controls never visually touch each other.
+      const spacingBuffer = 12
+      const projectedCenterLeft = navRect.width / 2 - centerRect.width / 2
+      const projectedCenterRight = navRect.width / 2 + centerRect.width / 2
+      const leftOccupied = leftRect.right - navRect.left
+      const rightOccupiedStart = rightRect.left - navRect.left
+      const shouldUseCompact =
+        projectedCenterLeft < leftOccupied + spacingBuffer ||
+        projectedCenterRight > rightOccupiedStart - spacingBuffer
+
+      setShowCompactProjectNav(shouldUseCompact)
+    }
+
+    updateNavMode()
+
+    const observer = new ResizeObserver(updateNavMode)
+    if (navContentRef.current) observer.observe(navContentRef.current)
+    if (leftSectionRef.current) observer.observe(leftSectionRef.current)
+    if (centerNavRef.current) observer.observe(centerNavRef.current)
+    if (rightSectionRef.current) observer.observe(rightSectionRef.current)
+    window.addEventListener("resize", updateNavMode)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", updateNavMode)
+    }
+  }, [isProjectPage, currentProjectId, currentProjectName, pathname, projectNavItems])
 
   const handleSignOut = async () => {
     await signOut()
@@ -108,9 +166,9 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto max-w-7xl flex h-16 items-center px-4">
-        <div className="flex h-full items-center justify-between relative w-full">
+        <div ref={navContentRef} className="flex h-full items-center justify-between relative w-full">
           {/* Left side - App Name and Breadcrumb */}
-          <div className="flex items-center gap-4">
+          <div ref={leftSectionRef} className="flex min-w-0 items-center gap-4">
             {/* App Name */}
             <Link
               href="/"
@@ -142,31 +200,52 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
                 </BreadcrumbList>
               </Breadcrumb>
             )}
+
+            {/* Compact Project Navigation */}
+            {isProjectPage && currentProjectId && showCompactProjectNav && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="Open project navigation">
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {projectNavItems.map((item) => {
+                    const isActive = pathname?.startsWith(item.href)
+                    return (
+                      <DropdownMenuItem key={item.href} asChild>
+                        <Link href={item.href} className={isActive ? "font-medium" : ""}>
+                          {item.label}
+                        </Link>
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
 
           {/* Center - Project Options (absolutely positioned) */}
           {isProjectPage && currentProjectId && (
-            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/projects/${currentProjectId}/sources`}>
-                  {t.nav.sources}
-                </Link>
-              </Button>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/projects/${currentProjectId}/citations`}>
-                  {t.nav.citations}
-                </Link>
-              </Button>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/projects/${currentProjectId}/settings`}>
-                  {t.nav.settings}
-                </Link>
-              </Button>
+            <div
+              ref={centerNavRef}
+              className={`absolute left-1/2 -translate-x-1/2 items-center gap-2 ${
+                showCompactProjectNav ? "invisible pointer-events-none flex" : "flex"
+              }`}
+            >
+              {projectNavItems.map((item) => {
+                const isActive = pathname?.startsWith(item.href)
+                return (
+                  <Button key={item.href} variant={isActive ? "secondary" : "ghost"} size="sm" asChild>
+                    <Link href={item.href}>{item.label}</Link>
+                  </Button>
+                )
+              })}
             </div>
           )}
 
           {/* Right side controls */}
-          <div className="flex items-center gap-2">
+          <div ref={rightSectionRef} className="flex items-center gap-2">
           {/* Theme Toggle */}
           {mounted && (
             <Button

@@ -1,6 +1,5 @@
 import { getProject, hasGithubConnection } from "@/app/actions/projects"
 import { notFound } from "next/navigation"
-import { GithubRepoSettings } from "@/components/github-repo-settings"
 import { SettingsPageClient } from "./settings-client"
 
 export default async function SettingsPage({
@@ -21,6 +20,7 @@ export default async function SettingsPage({
     <SettingsPageClient 
       projectId={projectId}
       projectTitle={project.title}
+      projectDescription={project.description}
       currentRepoUrl={project.githubRepoUrl || undefined}
       currentSelectedFiles={project.githubRepoFiles ? JSON.parse(project.githubRepoFiles) : undefined}
       hasConnection={hasConnection}

@@ -43,6 +43,12 @@ const translations = {
       projectDescriptionPlaceholder: "A brief description of your project...",
       creating: "Creating...",
       createCard: "Create a new project",
+      edit: "Edit",
+      editDialogTitle: "Edit Project",
+      editDialogDescription: "Update the project title and description.",
+      saving: "Saving...",
+      save: "Save",
+      projectUpdated: "Project updated successfully",
     },
     account: {
       title: "Account Settings",
@@ -343,6 +349,10 @@ const translations = {
     settings: {
       title: "Settings",
       projectSettings: "Project settings for",
+      projectDetails: {
+        title: "Project Details",
+        description: "Update the basic information for this project.",
+      },
       github: {
         title: "GitHub Repository",
         description: "Link your GitHub account to access repositories and check for citations in selected files",
@@ -460,6 +470,12 @@ const translations = {
       projectDescriptionPlaceholder: "Eine kurze Beschreibung deines Projekts...",
       creating: "Wird erstellt...",
       createCard: "Neues Projekt erstellen",
+      edit: "Bearbeiten",
+      editDialogTitle: "Projekt bearbeiten",
+      editDialogDescription: "Aktualisiere Titel und Beschreibung des Projekts.",
+      saving: "Wird gespeichert...",
+      save: "Speichern",
+      projectUpdated: "Projekt erfolgreich aktualisiert",
     },
     account: {
       title: "Kontoeinstellungen",
@@ -763,6 +779,10 @@ const translations = {
     settings: {
       title: "Einstellungen",
       projectSettings: "Projekteinstellungen für",
+      projectDetails: {
+        title: "Projektdetails",
+        description: "Aktualisiere die Grundinformationen dieses Projekts.",
+      },
       github: {
         title: "GitHub Repository",
         description: "Verknüpfe dein GitHub-Konto, um auf Repositorys zuzugreifen und Zitate in ausgewählten Dateien zu prüfen",

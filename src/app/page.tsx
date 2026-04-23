@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, FolderOpen, MoreVertical, Trash2 } from "lucide-react"
+import { Plus, FolderOpen, MoreVertical, Trash2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import {
   DropdownMenu,
@@ -38,7 +38,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { deleteProject } from "@/app/actions/projects"
+import { deleteProject, updateProjectData } from "@/app/actions/projects"
 
 export default function Home() {
   const { data: session, isPending: sessionPending } = useSession()
@@ -57,6 +57,13 @@ export default function Home() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingProject, setEditingProject] = useState<{
+    id: string
+    title: string
+    description: string
+  } | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const loadProjects = async () => {
     try {
@@ -129,6 +136,39 @@ export default function Home() {
       toast.error(error instanceof Error ? error.message : t.errors.generic)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleEditClick = (
+    project: { id: string; title: string; description: string | null },
+    e: React.MouseEvent
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setEditingProject({
+      id: project.id,
+      title: project.title,
+      description: project.description ?? "",
+    })
+    setEditDialogOpen(true)
+  }
+
+  const handleUpdateProject = async (formData: FormData) => {
+    if (!editingProject) return
+
+    try {
+      setSavingEdit(true)
+      const title = String(formData.get("title") ?? "")
+      const description = String(formData.get("description") ?? "")
+      await updateProjectData(editingProject.id, title, description)
+      await loadProjects()
+      setEditDialogOpen(false)
+      setEditingProject(null)
+      toast.success(t.home.projectUpdated)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t.errors.generic)
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -231,6 +271,10 @@ export default function Home() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenuItem onClick={(e) => handleEditClick(project, e)}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          {t.home.edit}
+                        </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
                           onClick={(e) => handleDeleteClick(project.id, e)}
@@ -246,7 +290,7 @@ export default function Home() {
                       href={`/projects/${project.id}/sources`} 
                       className="cursor-pointer"
                     >
-                      <CardDescription className="line-clamp-3 text-sm font-medium text-foreground/80">
+                      <CardDescription className="max-h-24 overflow-y-auto whitespace-pre-wrap text-sm font-medium text-foreground/80 pr-1">
                         {project.description}
                       </CardDescription>
                     </Link>
@@ -349,6 +393,69 @@ export default function Home() {
                   </>
                 ) : (
                   t.home.createProject
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open)
+          if (!open) setEditingProject(null)
+        }}
+      >
+        <DialogContent>
+          <form action={handleUpdateProject}>
+            <DialogHeader>
+              <DialogTitle>{t.home.editDialogTitle}</DialogTitle>
+              <DialogDescription>{t.home.editDialogDescription}</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-title">{t.home.projectTitle} *</Label>
+                <Input
+                  id="edit-title"
+                  name="title"
+                  placeholder={t.home.projectTitlePlaceholder}
+                  defaultValue={editingProject?.title ?? ""}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-description">{t.home.projectDescription}</Label>
+                <Textarea
+                  id="edit-description"
+                  name="description"
+                  placeholder={t.home.projectDescriptionPlaceholder}
+                  defaultValue={editingProject?.description ?? ""}
+                  rows={3}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditDialogOpen(false)
+                  setEditingProject(null)
+                }}
+                disabled={savingEdit}
+              >
+                {t.home.cancel}
+              </Button>
+              <Button type="submit" disabled={savingEdit}>
+                {savingEdit ? (
+                  <>
+                    <Spinner className="mr-2 h-4 w-4" />
+                    {t.home.saving}
+                  </>
+                ) : (
+                  t.home.save
                 )}
               </Button>
             </DialogFooter>
