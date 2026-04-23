@@ -1,5 +1,9 @@
 export const ACTIVE_THEME_COOKIE = "active_theme"
 export const ACTIVE_THEME_STORAGE_KEY = "source-manager-active-theme"
+export const ACTIVE_THEME_RADIUS_STORAGE_KEY = "source-manager-active-theme-radius"
+export const ACTIVE_THEME_FONT_STORAGE_KEY = "source-manager-active-theme-font"
+export const ACTIVE_THEME_RADIUS_PINNED_STORAGE_KEY = "source-manager-active-theme-radius-pinned"
+export const ACTIVE_THEME_FONT_PINNED_STORAGE_KEY = "source-manager-active-theme-font-pinned"
 export const DEFAULT_ACTIVE_THEME = "default"
 
 export const appThemes = [

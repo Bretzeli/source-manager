@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { Moon, Sun, User, LogOut, LogIn, Settings, Menu, Palette, Check } from "lucide-react"
+import { Moon, Sun, User, LogOut, LogIn, Settings, Menu, Palette, Check, Pin, PinOff, RotateCcw } from "lucide-react"
 import { avatarImageProps } from "@/lib/external-avatar-url"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,11 +33,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
 import { useTranslations, type Locale } from "@/lib/i18n"
 import { useSession, signOut } from "@/lib/auth-client"
 import { useAuthModal } from "@/contexts/auth-modal-context"
 import { getProject } from "@/app/actions/projects"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useProjectContext } from "@/contexts/project-context"
 import { useActiveTheme } from "@/components/active-theme-provider"
 import { appThemes } from "@/lib/theme-config"
@@ -49,14 +51,31 @@ interface NavbarProps {
 
 export function Navbar({ projectId, projectName }: NavbarProps) {
   const pathname = usePathname()
-  const { theme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
   const { t, locale, setLocale } = useTranslations()
-  const { activeTheme, setActiveTheme } = useActiveTheme()
+  const {
+    activeTheme,
+    setActiveTheme,
+    themeRadius,
+    setThemeRadius,
+    resetThemeRadius,
+    isRadiusPinned,
+    setIsRadiusPinned,
+    themeFontSans,
+    setThemeFontSans,
+    resetThemeFontSans,
+    isFontPinned,
+    setIsFontPinned,
+    availableThemeFonts,
+    availableThemeRadii,
+  } = useActiveTheme()
   const { data: session } = useSession()
   const { openModal } = useAuthModal()
   const { projectId: contextProjectId, projectName: contextProjectName } = useProjectContext()
   const [mounted, setMounted] = useState(false)
   const [showCompactProjectNav, setShowCompactProjectNav] = useState(false)
+  const [fontSearch, setFontSearch] = useState("")
+  const [isFontSelectOpen, setIsFontSelectOpen] = useState(false)
   const navContentRef = useRef<HTMLDivElement | null>(null)
   const leftSectionRef = useRef<HTMLDivElement | null>(null)
   const centerNavRef = useRef<HTMLDivElement | null>(null)
@@ -102,6 +121,66 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
         { href: `/projects/${currentProjectId}/settings`, label: t.nav.settings },
       ]
     : []
+
+  const getFontLabel = (fontValue: string) => {
+    return fontValue.split(",")[0]?.replace(/^["']|["']$/g, "") || fontValue
+  }
+
+  const fontOptions = (() => {
+    const optionsByKey = new Map<string, { key: string; label: string; value: string }>()
+
+    availableThemeFonts.forEach((fontStack) => {
+      const label = getFontLabel(fontStack)
+      const key = label.toLowerCase()
+      if (!optionsByKey.has(key)) {
+        optionsByKey.set(key, { key, label, value: fontStack })
+      }
+    })
+
+    const currentLabel = getFontLabel(themeFontSans)
+    const currentKey = currentLabel.toLowerCase()
+    if (themeFontSans.trim()) {
+      optionsByKey.set(currentKey, {
+        key: currentKey,
+        label: currentLabel,
+        value: themeFontSans,
+      })
+    }
+
+    return Array.from(optionsByKey.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    )
+  })()
+
+  const filteredFontOptions = useMemo(() => {
+    const search = fontSearch.trim().toLowerCase()
+    if (!search) return fontOptions
+    return fontOptions.filter((fontOption) =>
+      fontOption.label.toLowerCase().includes(search),
+    )
+  }, [fontOptions, fontSearch])
+
+  const selectedFontOptionKey = getFontLabel(themeFontSans).toLowerCase()
+
+  const radiusSliderValues = useMemo(() => {
+    return Array.from(
+      new Set(
+        availableThemeRadii
+          .map((radiusValue) => Number.parseFloat(radiusValue))
+          .filter((radiusValue) => Number.isFinite(radiusValue)),
+      ),
+    ).sort((a, b) => a - b)
+  }, [availableThemeRadii])
+
+  const currentRadiusValue = useMemo(() => {
+    const parsed = Number.parseFloat(themeRadius)
+    if (Number.isFinite(parsed)) return parsed
+    return radiusSliderValues[0] ?? 0.5
+  }, [themeRadius, radiusSliderValues])
+
+  const formatRadiusValue = (radiusValue: number) => {
+    return `${Number.parseFloat(radiusValue.toFixed(3))}rem`
+  }
 
   useEffect(() => {
     if (!isProjectPage || !currentProjectId) {
@@ -290,7 +369,7 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
                 <span className="sr-only">Open user menu</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-72">
               {isAuthenticated ? (
                 <>
                   <DropdownMenuLabel>
@@ -309,31 +388,209 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
                       <Palette className="mr-2 h-4 w-4" />
                       {t.nav.themes}
                     </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-64 p-2">
-                      {appThemes.map((themeOption) => {
+                    <DropdownMenuSubContent className="max-h-[min(70vh,32rem)] w-64 overflow-y-auto p-2">
+                      {[...appThemes]
+                        .sort((a, b) => {
+                          if (a.id === "default") return -1
+                          if (b.id === "default") return 1
+                          return a.label.localeCompare(b.label)
+                        })
+                        .map((themeOption) => {
                         const isSelected = activeTheme === themeOption.id
+                        const isDefaultThemeOption = themeOption.id === "default"
+                        const themeOptionClassName = isDefaultThemeOption
+                          ? "mb-1 rounded-lg border border-zinc-300 bg-zinc-50 p-0 text-zinc-900 shadow-sm last:mb-0 focus:bg-transparent focus:text-current data-[highlighted]:bg-transparent data-[highlighted]:text-current dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                          : `theme-${themeOption.id} mb-1 rounded-lg border border-border bg-card p-0 text-card-foreground shadow-sm last:mb-0 focus:bg-transparent focus:text-current data-[highlighted]:bg-transparent data-[highlighted]:text-current`
+                        const swatchBackground = isDefaultThemeOption
+                          ? resolvedTheme === "dark"
+                            ? "linear-gradient(to right, oklch(0.922 0 0) 0 50%, oklch(0.269 0 0) 50% 100%)"
+                            : "linear-gradient(to right, oklch(0.205 0 0) 0 50%, oklch(0.97 0 0) 50% 100%)"
+                          : "linear-gradient(to right, var(--primary) 0 50%, var(--accent) 50% 100%)"
                         return (
                           <DropdownMenuItem
                             key={themeOption.id}
-                            className={`theme-${themeOption.id} mb-1 rounded-lg border border-border bg-card p-0 text-card-foreground shadow-sm last:mb-0 focus:bg-transparent focus:text-current data-[highlighted]:bg-transparent data-[highlighted]:text-current`}
+                            className={themeOptionClassName}
                             onSelect={(event) => {
                               event.preventDefault()
                               setActiveTheme(themeOption.id)
                             }}
                           >
-                            <span className="flex w-full items-center gap-2 rounded-[inherit] border border-transparent px-3 py-2 font-sans text-sm transition-colors data-[highlighted]:border-border data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground">
+                            <span
+                              className="flex w-full items-center gap-2 rounded-[inherit] border border-transparent px-3 py-2 font-sans text-sm transition-colors data-[highlighted]:border-border data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
+                              style={
+                                isDefaultThemeOption
+                                  ? { fontFamily: "var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif" }
+                                  : undefined
+                              }
+                            >
+                              <span
+                                className="h-3.5 w-3.5 shrink-0 rounded-full"
+                                style={{
+                                  background: swatchBackground,
+                                }}
+                                aria-hidden="true"
+                              />
+                              <span className="truncate">{themeOption.label}</span>
                               <Check
-                                className={`h-4 w-4 ${
+                                className={`ml-auto h-4 w-4 shrink-0 ${
                                   isSelected ? "opacity-100" : "opacity-0"
                                 }`}
                               />
-                              <span className="truncate">{themeOption.label}</span>
                             </span>
                           </DropdownMenuItem>
                         )
                       })}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
+                  <DropdownMenuSeparator />
+                  <div className="space-y-1.5 px-2 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Radius
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            resetThemeRadius()
+                          }}
+                          aria-label="Reset radius to theme default"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            setIsRadiusPinned(!isRadiusPinned)
+                          }}
+                          aria-label={isRadiusPinned ? "Unpin radius from theme" : "Pin radius to keep it while switching themes"}
+                        >
+                          {isRadiusPinned ? (
+                            <Pin className="h-3.5 w-3.5" />
+                          ) : (
+                            <PinOff className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="rounded-md border px-3 py-2">
+                      <div className="mb-2 text-xs text-muted-foreground">{formatRadiusValue(currentRadiusValue)}</div>
+                      <Slider
+                        value={[currentRadiusValue]}
+                        min={radiusSliderValues[0] ?? 0.35}
+                        max={radiusSliderValues[radiusSliderValues.length - 1] ?? 2}
+                        step={0.025}
+                        onValueChange={(value) => {
+                          const radiusValue = value[0]
+                          if (!Number.isFinite(radiusValue)) return
+                          setThemeRadius(formatRadiusValue(radiusValue))
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <div className="space-y-1.5 px-2 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Font
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            resetThemeFontSans()
+                            setFontSearch("")
+                          }}
+                          aria-label="Reset font to theme default"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            setIsFontPinned(!isFontPinned)
+                          }}
+                          aria-label={isFontPinned ? "Unpin font from theme" : "Pin font to keep it while switching themes"}
+                        >
+                          {isFontPinned ? (
+                            <Pin className="h-3.5 w-3.5" />
+                          ) : (
+                            <PinOff className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    <Select
+                      value={selectedFontOptionKey}
+                      onValueChange={(selectedKey) => {
+                        const selectedOption = fontOptions.find(
+                          (fontOption) => fontOption.key === selectedKey,
+                        )
+                        if (!selectedOption) return
+                        setThemeFontSans(selectedOption.value)
+                      }}
+                      open={isFontSelectOpen}
+                      onOpenChange={(open) => {
+                        setIsFontSelectOpen(open)
+                        if (!open) {
+                          setFontSearch("")
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-full">
+                        <SelectValue placeholder={getFontLabel(themeFontSans)} />
+                      </SelectTrigger>
+                      <SelectContent
+                        className="max-h-72"
+                        position="popper"
+                        side="bottom"
+                        align="start"
+                        sideOffset={6}
+                        avoidCollisions={false}
+                      >
+                        <div className="sticky top-0 z-10 bg-popover p-2 pb-1">
+                          <Input
+                            value={fontSearch}
+                            onChange={(event) => setFontSearch(event.target.value)}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            placeholder="Search fonts..."
+                            className="h-8 text-xs"
+                            autoFocus
+                          />
+                        </div>
+                        {filteredFontOptions.map((fontOption) => (
+                          <SelectItem
+                            key={fontOption.key}
+                            value={fontOption.key}
+                            style={{ fontFamily: fontOption.value }}
+                          >
+                            {fontOption.label}
+                          </SelectItem>
+                        ))}
+                        {filteredFontOptions.length === 0 && (
+                          <div className="px-2 py-2 text-xs text-muted-foreground">
+                            No fonts found.
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
                     <Link href="/account/settings" className="flex items-center">
