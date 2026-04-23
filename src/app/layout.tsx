@@ -8,6 +8,8 @@ import { AuthModal } from "@/components/auth-modal";
 import { Toaster } from "@/components/ui/sonner";
 import { Navbar } from "@/components/navbar";
 import { AccountSettingsReauthClear } from "@/components/account-settings-reauth-clear";
+import { ActiveThemeProvider } from "@/components/active-theme-provider";
+import { cn } from "@/lib/utils";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,18 +34,25 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={cn(
+          geistSans.variable,
+          geistMono.variable,
+          "antialiased font-sans",
+        )}
+        suppressHydrationWarning
       >
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <AuthModalProvider>
-            <ProjectProvider>
-              <AccountSettingsReauthClear />
-              <Navbar />
-              {children}
-              <AuthModal />
-              <Toaster />
-            </ProjectProvider>
-          </AuthModalProvider>
+        <ThemeProvider attribute="class" disableTransitionOnChange>
+          <ActiveThemeProvider>
+            <AuthModalProvider>
+              <ProjectProvider>
+                <AccountSettingsReauthClear />
+                <Navbar />
+                {children}
+                <AuthModal />
+                <Toaster />
+              </ProjectProvider>
+            </AuthModalProvider>
+          </ActiveThemeProvider>
         </ThemeProvider>
       </body>
     </html>

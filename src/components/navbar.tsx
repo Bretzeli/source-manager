@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { Moon, Sun, User, LogOut, LogIn, Settings, Menu } from "lucide-react"
+import { Moon, Sun, User, LogOut, LogIn, Settings, Menu, Palette, Check } from "lucide-react"
 import { avatarImageProps } from "@/lib/external-avatar-url"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,6 +19,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -36,6 +39,8 @@ import { useAuthModal } from "@/contexts/auth-modal-context"
 import { getProject } from "@/app/actions/projects"
 import { useEffect, useRef, useState } from "react"
 import { useProjectContext } from "@/contexts/project-context"
+import { useActiveTheme } from "@/components/active-theme-provider"
+import { appThemes } from "@/lib/theme-config"
 
 interface NavbarProps {
   projectId?: string
@@ -46,6 +51,7 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { t, locale, setLocale } = useTranslations()
+  const { activeTheme, setActiveTheme } = useActiveTheme()
   const { data: session } = useSession()
   const { openModal } = useAuthModal()
   const { projectId: contextProjectId, projectName: contextProjectName } = useProjectContext()
@@ -297,6 +303,34 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
                       </p>
                     </div>
                   </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Palette className="mr-2 h-4 w-4" />
+                      {t.nav.themes}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-56">
+                      {appThemes.map((themeOption) => {
+                        const isSelected = activeTheme === themeOption.id
+                        return (
+                          <DropdownMenuItem
+                            key={themeOption.id}
+                            onSelect={(event) => {
+                              event.preventDefault()
+                              setActiveTheme(themeOption.id)
+                            }}
+                          >
+                            <Check
+                              className={`mr-2 h-4 w-4 ${
+                                isSelected ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            {themeOption.label}
+                          </DropdownMenuItem>
+                        )
+                      })}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
                     <Link href="/account/settings" className="flex items-center">
