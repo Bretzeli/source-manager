@@ -1,3 +1,10 @@
+.theme-default,
+[class*="theme-"] {
+  --theme-font-sans: var(--font-sans, var(--font-geist-sans));
+  --theme-font-serif: var(--font-serif, Georgia, serif);
+  --theme-font-mono: var(--font-mono, var(--font-geist-mono));
+}
+
 .theme-kodama-grove {
   --background: oklch(0.8798 0.0534 91.7893);
   --foreground: oklch(0.4265 0.0310 59.2153);
