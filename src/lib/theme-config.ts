@@ -67,6 +67,30 @@ export const appThemes = [
     id: "notebook",
     label: "Notebook",
   },
+  {
+    id: "sage-garden",
+    label: "Sage Garden",
+  },
+  {
+    id: "soft-pop",
+    label: "Soft Pop",
+  },
+  {
+    id: "supabase",
+    label: "Supabase",
+  },
+  {
+    id:  "tangerine",
+    label: "Tangerine",
+  },
+  {
+    id:  "muted-yellow",
+    label: "Muted Yellow",
+  },
+  {
+    id:  "winter",
+    label: "Winter",
+  },
 ] as const
 
 export type AppTheme = (typeof appThemes)[number]
