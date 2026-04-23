@@ -309,23 +309,26 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
                       <Palette className="mr-2 h-4 w-4" />
                       {t.nav.themes}
                     </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-56">
+                    <DropdownMenuSubContent className="w-64 p-2">
                       {appThemes.map((themeOption) => {
                         const isSelected = activeTheme === themeOption.id
                         return (
                           <DropdownMenuItem
                             key={themeOption.id}
+                            className={`theme-${themeOption.id} mb-1 rounded-lg border border-border bg-card p-0 text-card-foreground shadow-sm last:mb-0 focus:bg-transparent focus:text-current data-[highlighted]:bg-transparent data-[highlighted]:text-current`}
                             onSelect={(event) => {
                               event.preventDefault()
                               setActiveTheme(themeOption.id)
                             }}
                           >
-                            <Check
-                              className={`mr-2 h-4 w-4 ${
-                                isSelected ? "opacity-100" : "opacity-0"
-                              }`}
-                            />
-                            {themeOption.label}
+                            <span className="flex w-full items-center gap-2 rounded-[inherit] border border-transparent px-3 py-2 font-sans text-sm transition-colors data-[highlighted]:border-border data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground">
+                              <Check
+                                className={`h-4 w-4 ${
+                                  isSelected ? "opacity-100" : "opacity-0"
+                                }`}
+                              />
+                              <span className="truncate">{themeOption.label}</span>
+                            </span>
                           </DropdownMenuItem>
                         )
                       })}

@@ -31,6 +31,42 @@ export const appThemes = [
     id: "amethyst-haze",
     label: "Amethyst Haze",
   },
+  {
+    id: "amber-minimal",
+    label: "Amber Minimal",
+  },
+  {
+    id: "muted-amber",
+    label: "Muted Amber",
+  },
+  {
+    id: "bubblegum",
+    label: "Bubblegum",
+  },
+  {
+    id: "muted-bubblegum",
+    label: "Muted Bubblegum",
+  },
+  {
+    id: "candyland",
+    label: "Candyland",
+  },
+  {
+    id: "darkmatter",
+    label: "Dark Matter",
+  },
+  {
+    id: "midnight-bloom",
+    label: "Midnight Bloom",
+  },
+  {
+    id: "northern-lights",
+    label: "Northern Lights",
+  },
+  {
+    id: "notebook",
+    label: "Notebook",
+  },
 ] as const
 
 export type AppTheme = (typeof appThemes)[number]
