@@ -413,7 +413,7 @@ export async function getOAuthLoginSettings() {
           try {
             const info = await auth.api.accountInfo({
               headers: await headers(),
-              query: { accountId: entry.accountId },
+              query: { accountId: entry.id },
             })
             const resolvedImage = await resolveOAuthAccountProfileImageUrl(entry, info)
             if (resolvedImage) {
@@ -439,7 +439,7 @@ export async function getOAuthLoginSettings() {
       try {
         const info = await auth.api.accountInfo({
           headers: await headers(),
-          query: { accountId: entry.accountId },
+          query: { accountId: entry.id },
         })
         const resolvedEmail = extractEmailFromAccountInfo(info)
         if (resolvedEmail) {
@@ -466,7 +466,7 @@ export async function getOAuthLoginSettings() {
       try {
         const info = await auth.api.accountInfo({
           headers: await headers(),
-          query: { accountId: entry.accountId },
+          query: { accountId: entry.id },
         })
         fallbackImage = await resolveOAuthAccountProfileImageUrl(entry, info)
       } catch {
@@ -952,8 +952,8 @@ export async function unlinkOAuthAccount(providerId: string, accountId?: string)
   await auth.api.unlinkAccount({
     headers: await headers(),
     body: {
-      providerId,
-      accountId: target.accountId,
+      // Better Auth 1.7+: the account row id, not the provider's account id.
+      accountId: target.id,
     },
   })
 
