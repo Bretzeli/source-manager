@@ -51,9 +51,12 @@ import {
 } from "lucide-react"
 import { PREDEFINED_COLORS } from "./constants"
 import {
+  escapeHtmlSyntaxInMarkdownText,
+  getRichTextInlineColorStyle,
   markdownToSanitizedRichEditorHtml,
   RICH_TEXT_PROSE_LINK_STYLES,
   stripAtxHeadingMarkdownInSelection,
+  stripColorsFromPastedHtml,
 } from "./rich-text-markdown-utils"
 
 const RICH_TEXT_FONT_SIZES = ["12", "14", "16", "18", "20", "24"]
@@ -104,6 +107,41 @@ const RICH_TEXT_EMPTY_BLOCK_MD = "\n\n\u00a0\n\n"
 
 const turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" })
 turndownService.use(gfm)
+
+const escapeMarkdownSyntax = turndownService.escape.bind(turndownService)
+turndownService.escape = (text: string) => escapeHtmlSyntaxInMarkdownText(escapeMarkdownSyntax(text))
+
+/**
+ * Wrap converted inline content in an HTML tag pair (kept verbatim by `marked`). Edge whitespace / `<br>` breaks stay
+ * outside so a line never starts with a bare open tag (CommonMark would treat that as an HTML block); content spanning
+ * paragraphs can't be wrapped inline and is returned unchanged.
+ */
+function wrapInlineMarkdownInHtmlTag(content: string, openTag: string, closeTag: string) {
+  const match = content.match(/^([ \t\r\n]*)([\s\S]*?)([ \t\r\n]*)$/)
+  if (!match || !match[2] || match[2].includes("\n\n")) return content
+  return `${match[1]}${openTag}${match[2]}${closeTag}${match[3]}`
+}
+
+/** Text / highlight colors (`foreColor` / `hiliteColor`) have no Markdown form; persist them as inline `<span style>`. */
+turndownService.addRule("preserveInlineColors", {
+  filter(node) {
+    if (node.nodeName !== "SPAN" && node.nodeName !== "FONT") return false
+    return getRichTextInlineColorStyle(node as HTMLElement) !== null
+  },
+  replacement(content, node) {
+    const style = getRichTextInlineColorStyle(node as HTMLElement)
+    if (!style) return content
+    return wrapInlineMarkdownInHtmlTag(content, `<span style="${style}">`, "</span>")
+  },
+})
+
+/** Turndown has no rule for `<u>` and would drop it; keep the same `<u>` markup the Markdown-mode toolbar inserts. */
+turndownService.addRule("preserveUnderline", {
+  filter: ["u"],
+  replacement(content) {
+    return wrapInlineMarkdownInHtmlTag(content, "<u>", "</u>")
+  },
+})
 
 /** Nested `ul`/`ol` under `li` → raw HTML so hierarchy survives Markdown round-trip (GFM/Turndown flatten otherwise). */
 turndownService.addRule("nestedListsAsHtml", {
@@ -1653,11 +1691,11 @@ export function SourcesRichTextFullscreenDialog({
         const visual = richEditorVisualRef.current
         if (!visual) return
         visual.focus()
-        if (mode === "color") {
-          document.execCommand("foreColor", false, color)
-        } else {
-          document.execCommand("hiliteColor", false, color)
-        }
+        // CSS mode yields `<span style>` (persisted via `preserveInlineColors`); Firefox also needs it for
+        // `hiliteColor`. Switch it off again so bold / italic / underline keep producing `<b>` / `<i>` / `<u>`.
+        document.execCommand("styleWithCSS", false, "true")
+        document.execCommand(mode === "color" ? "foreColor" : "hiliteColor", false, color)
+        document.execCommand("styleWithCSS", false, "false")
         finalizeRichEditorVisualDom(visual)
         setDraft(htmlToMarkdown(visual.innerHTML))
         flushRichEditorToolbarState()
@@ -2272,6 +2310,17 @@ export function SourcesRichTextFullscreenDialog({
                         })
                       })
                     }
+                  }}
+                  onPaste={(e) => {
+                    const html = e.clipboardData.getData("text/html")
+                    if (!html) return
+                    e.preventDefault()
+                    const el = e.currentTarget as HTMLDivElement
+                    document.execCommand("insertHTML", false, stripColorsFromPastedHtml(html))
+                    finalizeRichEditorVisualDom(el)
+                    setDraft(htmlToMarkdown(el.innerHTML))
+                    flushRichEditorToolbarState()
+                    updateActiveTableSelection()
                   }}
                   onKeyDown={(e) => handleEditorKeyDown(e as unknown as React.KeyboardEvent<HTMLTextAreaElement>)}
                 />

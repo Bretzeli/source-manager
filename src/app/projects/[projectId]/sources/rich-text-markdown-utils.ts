@@ -111,6 +111,84 @@ export function sanitizeRichEditorTableCells(html: string): string {
   }
 }
 
+const NON_COLOR_CSS_KEYWORDS = new Set(["transparent", "inherit", "initial", "unset", "revert", "currentcolor"])
+
+/**
+ * Normalize a CSS color read from the editor DOM to a short, attribute-safe form: `#rrggbb`, `rgba(r,g,b,a)` or a
+ * bare color keyword. Anything else returns null, so no arbitrary text can reach a persisted `style="…"` attribute.
+ */
+export function normalizeRichTextCssColor(raw: string | null | undefined): string | null {
+  const value = (raw ?? "").trim().toLowerCase()
+  if (!value) return null
+  if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(value)) return value
+
+  const rgb = value.match(
+    /^rgba?\(\s*(\d{1,3})\s*[,\s]\s*(\d{1,3})\s*[,\s]\s*(\d{1,3})\s*(?:[,/]\s*(\d*\.?\d+)(%?)\s*)?\)$/
+  )
+  if (rgb) {
+    const channels = [rgb[1], rgb[2], rgb[3]].map(Number)
+    if (channels.some((n) => n > 255)) return null
+    const alpha = rgb[4] === undefined ? 1 : Number(rgb[4]) / (rgb[5] ? 100 : 1)
+    // Fully transparent (e.g. Chrome's `rgba(0, 0, 0, 0)`) has no visible effect.
+    if (!(alpha > 0)) return null
+    if (alpha >= 1) return `#${channels.map((n) => n.toString(16).padStart(2, "0")).join("")}`
+    return `rgba(${channels.join(",")},${Math.round(alpha * 1000) / 1000})`
+  }
+
+  if (/^[a-z]+$/.test(value) && !NON_COLOR_CSS_KEYWORDS.has(value)) return value
+  return null
+}
+
+/**
+ * Text / highlight color on an inline element (`<span style>` from `styleWithCSS`, `<font color>` otherwise) as the
+ * canonical `style` value persisted in Markdown, e.g. `color:#ef4444;background-color:#eab308`. Null if it has none.
+ */
+export function getRichTextInlineColorStyle(el: HTMLElement): string | null {
+  const color = normalizeRichTextCssColor(el.style.color || (el.nodeName === "FONT" ? el.getAttribute("color") : null))
+  const background = normalizeRichTextCssColor(el.style.backgroundColor)
+  const declarations: string[] = []
+  if (color) declarations.push(`color:${color}`)
+  if (background) declarations.push(`background-color:${background}`)
+  return declarations.length > 0 ? declarations.join(";") : null
+}
+
+/**
+ * Turndown escapes Markdown syntax only. A typed `<` or entity-like `&` would reach `marked` as raw HTML / an entity,
+ * so text such as `<span style="color:red">` typed in the visual editor would become real formatting on reload.
+ * Backslash-escape both so only markup the editor itself emits (colors, underline, nested lists, tables) is live.
+ * A `>` right after a non-space character becomes `&gt;`: GFM bare-URL autolinks would otherwise swallow it
+ * (typed `<https://x.org>` → href `https://x.org%3E`), while an entity ends the link.
+ * Apply to already Markdown-escaped text (a line-start `\>` stays as is).
+ */
+export function escapeHtmlSyntaxInMarkdownText(text: string): string {
+  return text
+    .replace(/&(?=#?[a-z0-9]+;)/gi, "\\&")
+    .replace(/</g, "\\<")
+    .replace(/([^\s\\])>/g, "$1&gt;")
+}
+
+/**
+ * Pasted HTML (web pages, Word, Docs) carries the source page's text / background colors as inline styles. Since
+ * colors are persisted, those would be saved too and clash with the app theme — drop them so persisted colors only
+ * come from the editor's own color tools.
+ */
+export function stripColorsFromPastedHtml(html: string): string {
+  try {
+    const body = new DOMParser().parseFromString(html, "text/html").body
+    body.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
+      el.style.removeProperty("color")
+      el.style.removeProperty("background-color")
+      el.style.removeProperty("background")
+      if (!el.getAttribute("style")?.trim()) el.removeAttribute("style")
+    })
+    body.querySelectorAll("font[color]").forEach((el) => el.removeAttribute("color"))
+    body.querySelectorAll("[bgcolor]").forEach((el) => el.removeAttribute("bgcolor"))
+    return body.innerHTML
+  } catch {
+    return html
+  }
+}
+
 /** Same pipeline as the fullscreen rich editor when loading Markdown into HTML. */
 export function markdownToSanitizedRichEditorHtml(markdown: string): string {
   const raw = marked.parse(prepareRichTextMarkdownForRender(markdown), { breaks: true, gfm: true }) as string
