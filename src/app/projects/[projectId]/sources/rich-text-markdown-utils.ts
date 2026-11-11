@@ -139,16 +139,26 @@ export function normalizeRichTextCssColor(raw: string | null | undefined): strin
   return null
 }
 
+/** Normalize an inline `font-size` (`23px`, `1.5em`, `120%`, …) to an attribute-safe form, or null if unsupported. */
+export function normalizeRichTextFontSize(raw: string | null | undefined): string | null {
+  const match = (raw ?? "").trim().toLowerCase().match(/^(\d{1,4}(?:\.\d+)?|\.\d+)(px|em|rem|%)$/)
+  if (!match) return null
+  const value = Math.round(Number(match[1]) * 100) / 100
+  return value > 0 ? `${value}${match[2]}` : null
+}
+
 /**
- * Text / highlight color on an inline element (`<span style>` from `styleWithCSS`, `<font color>` otherwise) as the
- * canonical `style` value persisted in Markdown, e.g. `color:#ef4444;background-color:#eab308`. Null if it has none.
+ * Text color, highlight and font size on an inline element (`<span style>`, or legacy `<font color>`) as the canonical
+ * `style` value persisted in Markdown, e.g. `color:#ef4444;background-color:#eab308;font-size:23px`. Null if none.
  */
-export function getRichTextInlineColorStyle(el: HTMLElement): string | null {
+export function getRichTextInlineTextStyle(el: HTMLElement): string | null {
   const color = normalizeRichTextCssColor(el.style.color || (el.nodeName === "FONT" ? el.getAttribute("color") : null))
   const background = normalizeRichTextCssColor(el.style.backgroundColor)
+  const fontSize = normalizeRichTextFontSize(el.style.fontSize)
   const declarations: string[] = []
   if (color) declarations.push(`color:${color}`)
   if (background) declarations.push(`background-color:${background}`)
+  if (fontSize) declarations.push(`font-size:${fontSize}`)
   return declarations.length > 0 ? declarations.join(";") : null
 }
 
@@ -168,20 +178,24 @@ export function escapeHtmlSyntaxInMarkdownText(text: string): string {
 }
 
 /**
- * Pasted HTML (web pages, Word, Docs) carries the source page's text / background colors as inline styles. Since
- * colors are persisted, those would be saved too and clash with the app theme — drop them so persisted colors only
- * come from the editor's own color tools.
+ * Pasted HTML (web pages, Word, Docs) carries the source page's text colors and sizes as inline styles. Since those
+ * are persisted, they would be saved too and clash with the app theme — drop them so persisted colors and sizes only
+ * come from the editor's own tools.
  */
-export function stripColorsFromPastedHtml(html: string): string {
+export function stripForeignTextStylesFromPastedHtml(html: string): string {
   try {
     const body = new DOMParser().parseFromString(html, "text/html").body
     body.querySelectorAll<HTMLElement>("[style]").forEach((el) => {
       el.style.removeProperty("color")
       el.style.removeProperty("background-color")
       el.style.removeProperty("background")
+      el.style.removeProperty("font-size")
       if (!el.getAttribute("style")?.trim()) el.removeAttribute("style")
     })
-    body.querySelectorAll("font[color]").forEach((el) => el.removeAttribute("color"))
+    body.querySelectorAll("font[color], font[size]").forEach((el) => {
+      el.removeAttribute("color")
+      el.removeAttribute("size")
+    })
     body.querySelectorAll("[bgcolor]").forEach((el) => el.removeAttribute("bgcolor"))
     return body.innerHTML
   } catch {

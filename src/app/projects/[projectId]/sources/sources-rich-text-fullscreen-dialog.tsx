@@ -48,18 +48,55 @@ import {
   FileText,
   BetweenVerticalStart,
   BetweenHorizontalStart,
+  ChevronDown,
 } from "lucide-react"
 import { PREDEFINED_COLORS } from "./constants"
 import {
   escapeHtmlSyntaxInMarkdownText,
-  getRichTextInlineColorStyle,
+  getRichTextInlineTextStyle,
   markdownToSanitizedRichEditorHtml,
   RICH_TEXT_PROSE_LINK_STYLES,
   stripAtxHeadingMarkdownInSelection,
-  stripColorsFromPastedHtml,
+  stripForeignTextStylesFromPastedHtml,
 } from "./rich-text-markdown-utils"
+import { applyInlineFontSize, RICH_TEXT_CARET_PLACEHOLDER } from "./rich-text-inline-font-size"
 
 const RICH_TEXT_FONT_SIZES = ["12", "14", "16", "18", "20", "24"]
+/** Presets for the per-selection size; any value in the min–max range can be typed. */
+const RICH_TEXT_INLINE_FONT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64]
+const RICH_TEXT_INLINE_FONT_SIZE_MIN = 4
+const RICH_TEXT_INLINE_FONT_SIZE_MAX = 200
+
+function parseInlineFontSizeInput(raw: string): number | null {
+  const value = Number(raw.trim().replace(/px$/i, "").replace(",", "."))
+  if (!Number.isFinite(value) || value < RICH_TEXT_INLINE_FONT_SIZE_MIN || value > RICH_TEXT_INLINE_FONT_SIZE_MAX) return null
+  return Math.round(value * 10) / 10
+}
+
+function formatFontSizePx(px: number) {
+  return String(Math.round(px * 10) / 10)
+}
+
+/** Font size (px, as shown in the size box) of the selected text; "" when the selection mixes sizes. */
+function readSelectionFontSizePx(range: Range): string {
+  const sizeOf = (node: Node) => {
+    const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
+    const px = el ? Number.parseFloat(getComputedStyle(el).fontSize) : Number.NaN
+    return Number.isFinite(px) ? formatFontSizePx(px) : ""
+  }
+  const container = range.commonAncestorContainer
+  if (range.collapsed || container.nodeType === Node.TEXT_NODE) return sizeOf(range.startContainer)
+
+  let size: string | null = null
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!range.intersectsNode(node) || !(node.textContent ?? "").replace(/[\s\u200b]/g, "")) continue
+    const nodeSize = sizeOf(node)
+    if (size !== null && nodeSize !== size) return ""
+    size = nodeSize
+  }
+  return size ?? sizeOf(range.startContainer)
+}
 const RICH_TEXT_COLORS = [...PREDEFINED_COLORS.map((color) => color.value), "#ffffff", "#d1d5db", "#f59e0b", "#22c55e", "#0ea5e9", "#8b5cf6", "#ec4899"]
 
 /** Relative to the editor base font size (inline `fontSize` on the contenteditable). */
@@ -74,6 +111,8 @@ type WysiwygToolbarState = {
   italic: boolean
   underline: boolean
   blockTag: "normal" | "h1" | "h2" | "h3" | "h4"
+  /** Size of the selected text in px ("" if mixed). */
+  fontSize: string
 }
 
 type TableSelectionState = {
@@ -91,6 +130,7 @@ const DEFAULT_WYSIWYG_TOOLBAR_STATE: WysiwygToolbarState = {
   italic: false,
   underline: false,
   blockTag: "normal",
+  fontSize: "",
 }
 
 function parseFormatBlockTag(): "normal" | "h1" | "h2" | "h3" | "h4" {
@@ -109,7 +149,8 @@ const turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyl
 turndownService.use(gfm)
 
 const escapeMarkdownSyntax = turndownService.escape.bind(turndownService)
-turndownService.escape = (text: string) => escapeHtmlSyntaxInMarkdownText(escapeMarkdownSyntax(text))
+turndownService.escape = (text: string) =>
+  escapeHtmlSyntaxInMarkdownText(escapeMarkdownSyntax(text.replaceAll(RICH_TEXT_CARET_PLACEHOLDER, "")))
 
 /**
  * Wrap converted inline content in an HTML tag pair (kept verbatim by `marked`). Edge whitespace / `<br>` breaks stay
@@ -122,14 +163,14 @@ function wrapInlineMarkdownInHtmlTag(content: string, openTag: string, closeTag:
   return `${match[1]}${openTag}${match[2]}${closeTag}${match[3]}`
 }
 
-/** Text / highlight colors (`foreColor` / `hiliteColor`) have no Markdown form; persist them as inline `<span style>`. */
-turndownService.addRule("preserveInlineColors", {
+/** Text colors, highlights and font sizes have no Markdown form; persist them as inline `<span style>`. */
+turndownService.addRule("preserveInlineTextStyles", {
   filter(node) {
     if (node.nodeName !== "SPAN" && node.nodeName !== "FONT") return false
-    return getRichTextInlineColorStyle(node as HTMLElement) !== null
+    return getRichTextInlineTextStyle(node as HTMLElement) !== null
   },
   replacement(content, node) {
-    const style = getRichTextInlineColorStyle(node as HTMLElement)
+    const style = getRichTextInlineTextStyle(node as HTMLElement)
     if (!style) return content
     return wrapInlineMarkdownInHtmlTag(content, `<span style="${style}">`, "</span>")
   },
@@ -785,6 +826,9 @@ export function SourcesRichTextFullscreenDialog({
   const [tableSelectionState, setTableSelectionState] = React.useState<TableSelectionState | null>(null)
   const [textColorOpen, setTextColorOpen] = React.useState(false)
   const [highlightColorOpen, setHighlightColorOpen] = React.useState(false)
+  const [fontSizeMenuOpen, setFontSizeMenuOpen] = React.useState(false)
+  /** What the user is typing in the size box; null shows the size of the current selection. */
+  const [fontSizeInputDraft, setFontSizeInputDraft] = React.useState<string | null>(null)
   const [richTextLinkDialogOpen, setRichTextLinkDialogOpen] = React.useState(false)
   const [richTextLinkText, setRichTextLinkText] = React.useState("")
   const [richTextLinkUrl, setRichTextLinkUrl] = React.useState("")
@@ -958,11 +1002,18 @@ export function SourcesRichTextFullscreenDialog({
       return
     }
     const blockTag = parseFormatBlockTag()
+    const fontSize = readSelectionFontSizePx(sel.getRangeAt(0))
     setWysiwygToolbarState((prev) => {
-      if (prev.bold === bold && prev.italic === italic && prev.underline === underline && prev.blockTag === blockTag) {
+      if (
+        prev.bold === bold &&
+        prev.italic === italic &&
+        prev.underline === underline &&
+        prev.blockTag === blockTag &&
+        prev.fontSize === fontSize
+      ) {
         return prev
       }
-      return { bold, italic, underline, blockTag }
+      return { bold, italic, underline, blockTag, fontSize }
     })
   }, [markdownMode])
 
@@ -1691,7 +1742,7 @@ export function SourcesRichTextFullscreenDialog({
         const visual = richEditorVisualRef.current
         if (!visual) return
         visual.focus()
-        // CSS mode yields `<span style>` (persisted via `preserveInlineColors`); Firefox also needs it for
+        // CSS mode yields `<span style>` (persisted via `preserveInlineTextStyles`); Firefox also needs it for
         // `hiliteColor`. Switch it off again so bold / italic / underline keep producing `<b>` / `<i>` / `<u>`.
         document.execCommand("styleWithCSS", false, "true")
         document.execCommand(mode === "color" ? "foreColor" : "hiliteColor", false, color)
@@ -1717,6 +1768,63 @@ export function SourcesRichTextFullscreenDialog({
       })
     },
     [markdownMode, flushRichEditorToolbarState]
+  )
+
+  /** Set (`sizePx`) or reset (`null`) the font size of the selection / of text typed next at the caret. */
+  const applyInlineFontSizeToSelection = React.useCallback(
+    (sizePx: number | null) => {
+      if (markdownMode) {
+        const textarea = richEditorTextareaRef.current
+        if (!textarea || sizePx === null) return
+        const start = textarea.selectionStart
+        const end = textarea.selectionEnd
+        setDraft((value) => {
+          const result = insertAtSelection(value, start, end, `<span style="font-size:${sizePx}px">`, "</span>")
+          requestAnimationFrame(() => {
+            textarea.focus()
+            textarea.setSelectionRange(result.caretStart, result.caretEnd)
+          })
+          return result.nextValue
+        })
+        return
+      }
+
+      const visual = richEditorVisualRef.current
+      if (!visual) return
+      // The size box / preset menu takes focus, so fall back to the last selection inside the editor.
+      const live = window.getSelection()
+      let range: Range | null =
+        live && live.rangeCount > 0 && visual.contains(live.getRangeAt(0).commonAncestorContainer)
+          ? live.getRangeAt(0)
+          : richEditorVisualSavedRangeRef.current
+      if (range && !visual.contains(range.commonAncestorContainer)) range = null
+      if (!range) return
+
+      const next = applyInlineFontSize(
+        visual,
+        {
+          start: { node: range.startContainer, offset: range.startOffset },
+          end: { node: range.endContainer, offset: range.endOffset },
+        },
+        sizePx
+      )
+      if (!next) return
+      finalizeRichEditorVisualDom(visual)
+      visual.focus()
+      const sel = window.getSelection()
+      if (sel) {
+        const restored = document.createRange()
+        restored.setStart(next.start.node, next.start.offset)
+        restored.setEnd(next.end.node, next.end.offset)
+        sel.removeAllRanges()
+        sel.addRange(restored)
+        richEditorVisualSavedRangeRef.current = restored.cloneRange()
+      }
+      setDraft(htmlToMarkdown(visual.innerHTML))
+      flushRichEditorToolbarState()
+      updateActiveTableSelection()
+    },
+    [markdownMode, flushRichEditorToolbarState, updateActiveTableSelection]
   )
 
   const applyTextType = React.useCallback(
@@ -1903,8 +2011,92 @@ export function SourcesRichTextFullscreenDialog({
                 </div>
               </PopoverContent>
             </Popover>
+            <div className="flex items-center" data-rich-editor-control="true">
+              <Input
+                aria-label="Text size of the selection in px"
+                title="Text size of the selection (px) — type a size and press Enter"
+                value={fontSizeInputDraft ?? (markdownMode ? "" : wysiwygToolbarState.fontSize)}
+                placeholder="px"
+                inputMode="decimal"
+                className="h-9 w-16 rounded-r-none"
+                onFocus={(e) => {
+                  setFontSizeInputDraft(e.currentTarget.value)
+                  e.currentTarget.select()
+                }}
+                onChange={(e) => setFontSizeInputDraft(e.target.value)}
+                onBlur={() => setFontSizeInputDraft(null)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return
+                  e.preventDefault()
+                  const sizePx = parseInlineFontSizeInput(fontSizeInputDraft ?? "")
+                  setFontSizeInputDraft(null)
+                  if (sizePx !== null) applyInlineFontSizeToSelection(sizePx)
+                }}
+                data-rich-editor-control="true"
+              />
+              <Popover open={fontSizeMenuOpen} onOpenChange={setFontSizeMenuOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 rounded-l-none border-l-0 px-1.5"
+                    aria-label="Text size presets"
+                    title="Text size presets"
+                    onMouseDown={(e) => {
+                      if (!markdownMode) e.preventDefault()
+                    }}
+                    data-rich-editor-control="true"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-32 p-1">
+                  <div className="grid max-h-72 overflow-y-auto">
+                    {!markdownMode ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="justify-start"
+                        title="Remove the size from the selection (back to the default size)"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          applyInlineFontSizeToSelection(null)
+                          setFontSizeMenuOpen(false)
+                        }}
+                        data-rich-editor-control="true"
+                      >
+                        Default
+                      </Button>
+                    ) : null}
+                    {RICH_TEXT_INLINE_FONT_SIZES.map((size) => (
+                      <Button
+                        key={size}
+                        size="sm"
+                        variant={!markdownMode && wysiwygToolbarState.fontSize === String(size) ? "secondary" : "ghost"}
+                        className="justify-start"
+                        onMouseDown={(e) => {
+                          if (!markdownMode) e.preventDefault()
+                        }}
+                        onClick={() => {
+                          applyInlineFontSizeToSelection(size)
+                          setFontSizeMenuOpen(false)
+                        }}
+                        data-rich-editor-control="true"
+                      >
+                        {size}px
+                      </Button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
             <Select value={fontSize} onValueChange={onFontSizeChange}>
-              <SelectTrigger className="w-[100px] h-9" data-rich-editor-control="true">
+              <SelectTrigger
+                className="w-[140px] h-9"
+                title="Default size of text without its own size (also used in the table)"
+                data-rich-editor-control="true"
+              >
+                <span className="text-muted-foreground">Default</span>
                 <SelectValue placeholder="Size" />
               </SelectTrigger>
               <SelectContent>
@@ -2316,7 +2508,7 @@ export function SourcesRichTextFullscreenDialog({
                     if (!html) return
                     e.preventDefault()
                     const el = e.currentTarget as HTMLDivElement
-                    document.execCommand("insertHTML", false, stripColorsFromPastedHtml(html))
+                    document.execCommand("insertHTML", false, stripForeignTextStylesFromPastedHtml(html))
                     finalizeRichEditorVisualDom(el)
                     setDraft(htmlToMarkdown(el.innerHTML))
                     flushRichEditorToolbarState()
