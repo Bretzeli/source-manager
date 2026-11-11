@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img">
+  <title>Raptor</title>
+  <defs>
+    <g id="silhouette">
+      <!-- long, low head with a flat snout -->
+      <path d="M36,90 C36,82 44,78 54,76 C76,72 94,62 116,60 C140,58 154,72 154,90 C154,106 142,118 122,120 C100,122 72,118 52,112 C42,109 36,100 36,90 Z"/>
+      <!-- S-curved neck -->
+      <path d="M108,112 C114,140 116,160 110,184 L166,166 C152,146 146,122 144,92 Z"/>
+      <!-- slim, sloping body -->
+      <ellipse cx="160" cy="180" rx="58" ry="28" transform="rotate(-16 160 180)"/>
+      <!-- chest continues below the frame (upper body only) -->
+      <ellipse cx="138" cy="234" rx="40" ry="48"/>
+      <!-- smooth the corner between chest and body underside -->
+      <path d="M176,224 C172.6,204.4 206.3,194.3 225.5,178.3 L222,160 L150,180 L150,205 Z"/>
+      <!-- long stiff tail -->
+      <path d="M196,162 C226,148 252,134 282,122 L286,138 C258,152 234,170 212,190 Z"/>
+    </g>
+    <mask id="silhouette-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <use href="#silhouette" fill="#fff"/>
+    </mask>
+  </defs>
+  <rect width="256" height="256" fill="#efe9ff"/>
+  <g transform="translate(-14 -26) scale(1.2)">
+
+  <!-- swept-back head feathers -->
+  <g fill="#4fc1b0" stroke="#3f3d56" stroke-width="5" stroke-linejoin="round">
+    <ellipse cx="158" cy="64" rx="6" ry="15" transform="rotate(60 158 64)"/>
+    <ellipse cx="164" cy="78" rx="6" ry="15" transform="rotate(78 164 78)"/>
+  </g>
+
+  <use href="#silhouette" fill="#3f3d56" stroke="#3f3d56" stroke-width="10" stroke-linejoin="round"/>
+  <use href="#silhouette" fill="#ffa65c"/>
+
+  <g mask="url(#silhouette-mask)">
+    <!-- lower jaw, throat + belly -->
+    <path d="M44,102 Q84,110 118,100 C124,112 126,126 125,140 C124,158 124,174 127,190 C131,212 134,240 132,290 L60,290 L30,110 Z" fill="#ffe2c2"/>
+    <!-- back stripes -->
+    <g fill="none" stroke="#ef8a3e" stroke-width="7" stroke-linecap="round">
+      <path d="M126,50 L122,68"/>
+      <path d="M142,56 L136,72"/>
+      <path d="M162,96 L148,104"/>
+      <path d="M168,122 L152,128"/>
+      <path d="M184,138 L178,158"/>
+      <path d="M204,134 L196,154"/>
+      <path d="M226,124 L220,146"/>
+      <path d="M248,114 L242,136"/>
+    </g>
+  </g>
+
+  <!-- feathered arm with three claws -->
+  <path d="M126,182 C128,204 116,218 100,213 C104,207 106,201 106,194 Z" fill="#4fc1b0" stroke="#3f3d56" stroke-width="3.5" stroke-linejoin="round"/>
+  <g fill="none" stroke-linecap="round">
+    <g stroke="#3f3d56" stroke-width="9">
+      <path d="M88,188 Q78,190 74,198"/>
+      <path d="M91,193 Q83,198 81,206"/>
+      <path d="M96,195 Q92,202 92,210"/>
+    </g>
+    <g stroke="#fff3d6" stroke-width="4">
+      <path d="M88,188 Q78,190 74,198"/>
+      <path d="M91,193 Q83,198 81,206"/>
+      <path d="M96,195 Q92,202 92,210"/>
+    </g>
+  </g>
+  <path d="M132,168 Q118,190 92,190" fill="none" stroke="#3f3d56" stroke-width="20" stroke-linecap="round"/>
+  <path d="M132,168 Q118,190 92,190" fill="none" stroke="#ffa65c" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- toothy grin -->
+  <g stroke="#3f3d56" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M56,104 L66,105 L61,112 Z" fill="#fff" stroke-width="2.5"/>
+    <path d="M72,105.5 L82,105.5 L77,112.5 Z" fill="#fff" stroke-width="2.5"/>
+    <path d="M88,105 L98,104.5 L93,111.5 Z" fill="#fff" stroke-width="2.5"/>
+    <path d="M44,102 Q84,110 120,99" fill="none" stroke-width="5"/>
+  </g>
+
+  <!-- nostril -->
+  <ellipse cx="47" cy="86" rx="3" ry="2.2" fill="#3f3d56"/>
+
+  <!-- eye + brow ridge -->
+  <ellipse cx="114" cy="82" rx="9" ry="11" fill="#2d2b3f"/>
+  <circle cx="117.5" cy="77" r="3.5" fill="#fff"/>
+  <circle cx="111" cy="87" r="1.8" fill="#fff"/>
+  <path d="M100,70 L126,63" fill="none" stroke="#3f3d56" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- blush -->
+  <ellipse cx="128" cy="96" rx="8" ry="5" fill="#ff8fa3" opacity="0.55"/>
+  </g>
+</svg>

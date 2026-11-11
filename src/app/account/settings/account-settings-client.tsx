@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { AlertTriangle, Link2, LogIn, Trash2, Unlink, UserCircle } from "lucide-react"
 import { toast } from "sonner"
@@ -22,7 +22,7 @@ import { useAuthModal } from "@/contexts/auth-modal-context"
 import { useTranslations } from "@/lib/i18n"
 import authClient from "@/lib/auth-client"
 import { ProviderIcon, type OAuthProviderId } from "@/components/oauth-provider-icons"
-import { getPresetAvatarDisplayLabel } from "@/data/avatar-preset-display-names"
+import { getPresetAvatarDisplayLabel, groupPresetAvatarUrls } from "@/data/avatar-presets"
 import { avatarImageProps } from "@/lib/external-avatar-url"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -57,6 +57,45 @@ const AVAILABLE_OAUTH_PROVIDERS = ["github", "google", "discord", "atlassian"] a
 const DISPLAY_IMAGE_DEFAULT = "__default__"
 
 type AccountSection = "oauth" | "display" | "delete"
+
+function AvatarGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={title} className="space-y-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div className="flex flex-wrap gap-4">{children}</div>
+    </div>
+  )
+}
+
+function AvatarChoiceButton({
+  selected,
+  label,
+  onSelect,
+  children,
+}: {
+  selected: boolean
+  label: string
+  onSelect: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      className="flex flex-col items-center gap-2 rounded-md p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onSelect}
+    >
+      <span
+        className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 bg-muted ${
+          selected ? "border-primary" : "border-transparent"
+        }`}
+      >
+        {children}
+      </span>
+      <span className="text-xs text-center max-w-[5.5rem] leading-tight break-words">{label}</span>
+    </button>
+  )
+}
 
 export default function AccountSettingsClient() {
   const { t, locale } = useTranslations()
@@ -571,82 +610,63 @@ export default function AccountSettingsClient() {
 
                   <div className="space-y-3">
                     <Label>{t.account.displayInformation.displayImageLabel}</Label>
-                    <div className="flex flex-wrap gap-4">
-                      <button
-                        type="button"
-                        className="flex flex-col items-center gap-2 rounded-md p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => setDisplayImageChoice(DISPLAY_IMAGE_DEFAULT)}
-                      >
-                        <span
-                          className={`flex h-16 w-16 items-center justify-center rounded-full border-2 bg-muted ${
-                            displayImageChoice === DISPLAY_IMAGE_DEFAULT
-                              ? "border-primary"
-                              : "border-transparent"
-                          }`}
+                    <div className="space-y-5">
+                      {groupPresetAvatarUrls(presetAvatarUrls).map(({ group, urls }) => (
+                        <AvatarGroup
+                          key={group}
+                          title={t.account.displayInformation.avatarGroups[group]}
+                        >
+                          {urls.map((url) => (
+                            <AvatarChoiceButton
+                              key={url}
+                              selected={displayImageChoice === url}
+                              label={getPresetAvatarDisplayLabel(url, locale)}
+                              onSelect={() => setDisplayImageChoice(url)}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={url} alt="" className="h-full w-full object-cover" />
+                            </AvatarChoiceButton>
+                          ))}
+                        </AvatarGroup>
+                      ))}
+
+                      {displayImageOptions.length > 0 ? (
+                        <AvatarGroup title={t.account.displayInformation.avatarGroups.oauth}>
+                          {displayImageOptions.map((option) => (
+                            <AvatarChoiceButton
+                              key={option.accountId}
+                              selected={displayImageChoice === option.accountId}
+                              label={providerLabel(option.providerId)}
+                              onSelect={() => setDisplayImageChoice(option.accountId)}
+                            >
+                              {option.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  {...avatarImageProps(option.imageUrl)}
+                                  alt=""
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <ProviderIcon
+                                  provider={option.providerId as OAuthProviderId}
+                                  className="h-8 w-8 opacity-70"
+                                />
+                              )}
+                            </AvatarChoiceButton>
+                          ))}
+                        </AvatarGroup>
+                      ) : null}
+
+                      <AvatarGroup title={t.account.displayInformation.avatarGroups.default}>
+                        <AvatarChoiceButton
+                          selected={displayImageChoice === DISPLAY_IMAGE_DEFAULT}
+                          label={t.account.displayInformation.defaultAvatarLabel}
+                          onSelect={() => setDisplayImageChoice(DISPLAY_IMAGE_DEFAULT)}
                         >
                           <UserCircle className="h-9 w-9 text-muted-foreground" />
-                        </span>
-                        <span className="text-xs text-center max-w-[5.5rem]">
-                          {t.account.displayInformation.defaultAvatarLabel}
-                        </span>
-                      </button>
-                      {presetAvatarUrls.map((url) => (
-                        <button
-                          key={url}
-                          type="button"
-                          className="flex flex-col items-center gap-2 rounded-md p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => setDisplayImageChoice(url)}
-                        >
-                          <span
-                            className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 bg-muted ${
-                              displayImageChoice === url ? "border-primary" : "border-transparent"
-                            }`}
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt="" className="h-full w-full object-cover" />
-                          </span>
-                          <span className="text-xs text-center max-w-[5.5rem] leading-tight break-all">
-                            {getPresetAvatarDisplayLabel(url, locale)}
-                          </span>
-                        </button>
-                      ))}
-                      {displayImageOptions.map((option) => (
-                        <button
-                          key={option.accountId}
-                          type="button"
-                          className="flex flex-col items-center gap-2 rounded-md p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => setDisplayImageChoice(option.accountId)}
-                        >
-                          <span
-                            className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-2 bg-muted ${
-                              displayImageChoice === option.accountId
-                                ? "border-primary"
-                                : "border-transparent"
-                            }`}
-                          >
-                            {option.imageUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                {...avatarImageProps(option.imageUrl)}
-                                alt=""
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <ProviderIcon
-                                provider={option.providerId as OAuthProviderId}
-                                className="h-8 w-8 opacity-70"
-                              />
-                            )}
-                          </span>
-                          <span className="text-xs text-center max-w-[5.5rem] leading-tight">
-                            {providerLabel(option.providerId)}
-                          </span>
-                        </button>
-                      ))}
+                        </AvatarChoiceButton>
+                      </AvatarGroup>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {t.account.displayInformation.displayImageHint}
-                    </p>
                   </div>
 
                   <Button onClick={() => void handleSaveDisplayInformation()} disabled={displaySaving}>

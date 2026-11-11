@@ -127,8 +127,13 @@ const translations = {
         displayEmailLabel: "Email shown in the app",
         displayEmailHint: "Pick from addresses linked to your OAuth providers.",
         displayImageLabel: "Profile picture",
-        displayImageHint:
-          "Use the default icon, any image file placed in public/avatars (shown automatically), or a linked provider avatar.",
+        avatarGroups: {
+          default: "Default",
+          oauth: "OAuth providers",
+          animals: "Animal friends",
+          dinosaurs: "Dinosaurs",
+          other: "More",
+        },
         defaultAvatarLabel: "Default icon",
         saveAction: "Save display settings",
         saving: "Saving...",
@@ -557,8 +562,13 @@ const translations = {
         displayEmailLabel: "In der App angezeigte E-Mail",
         displayEmailHint: "Wähle aus den Adressen, die mit deinen OAuth-Anbietern verknüpft sind.",
         displayImageLabel: "Profilbild",
-        displayImageHint:
-          "Nutze das Standard-Symbol, eine Bilddatei in public/avatars (wird automatisch angezeigt) oder ein verknüpftes Anbieter-Avatar.",
+        avatarGroups: {
+          default: "Standard",
+          oauth: "OAuth-Anbieter",
+          animals: "Tierfreunde",
+          dinosaurs: "Dinosaurier",
+          other: "Weitere",
+        },
         defaultAvatarLabel: "Standard-Symbol",
         saveAction: "Anzeige-Einstellungen speichern",
         saving: "Wird gespeichert...",

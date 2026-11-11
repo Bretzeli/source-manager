@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img">
+  <title>Dodo</title>
+  <defs>
+    <g id="tail">
+      <circle cx="210" cy="152" r="15"/>
+      <circle cx="220" cy="132" r="13"/>
+      <circle cx="202" cy="124" r="13"/>
+      <circle cx="224" cy="160" r="10"/>
+    </g>
+    <g id="silhouette">
+      <ellipse cx="138" cy="178" rx="82" ry="76"/>
+      <circle cx="112" cy="96" r="44"/>
+    </g>
+    <path id="beak" d="M86,82 C66,78 46,82 36,96 C28,106 32,120 44,122 C46,114 50,110 58,110 C70,114 82,118 94,116 Z"/>
+    <mask id="silhouette-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <use href="#silhouette" fill="#fff"/>
+    </mask>
+    <clipPath id="beak-clip">
+      <use href="#beak"/>
+    </clipPath>
+  </defs>
+  <rect width="256" height="256" fill="#ffe7ee"/>
+
+  <!-- tail tuft -->
+  <use href="#tail" fill="#3f3d56" stroke="#3f3d56" stroke-width="10" stroke-linejoin="round"/>
+  <use href="#tail" fill="#fff8ec"/>
+
+  <!-- head tuft -->
+  <g fill="#8f9bbd" stroke="#3f3d56" stroke-width="5" stroke-linejoin="round">
+    <ellipse cx="100" cy="56" rx="7" ry="16" transform="rotate(-30 100 56)"/>
+    <ellipse cx="114" cy="50" rx="7" ry="17"/>
+    <ellipse cx="128" cy="56" rx="7" ry="16" transform="rotate(30 128 56)"/>
+  </g>
+
+  <use href="#silhouette" fill="#3f3d56" stroke="#3f3d56" stroke-width="10" stroke-linejoin="round"/>
+  <use href="#silhouette" fill="#a9b4d0"/>
+
+  <g mask="url(#silhouette-mask)">
+    <ellipse cx="112" cy="210" rx="52" ry="46" fill="#dde2f0"/>
+  </g>
+
+  <!-- wing -->
+  <g stroke="#3f3d56" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <ellipse cx="170" cy="182" rx="28" ry="38" transform="rotate(-18 170 182)" fill="#8f9bbd"/>
+    <path d="M160,170 Q170,182 166,200" fill="none" stroke-width="4"/>
+    <path d="M176,164 Q186,178 182,198" fill="none" stroke-width="4"/>
+  </g>
+
+  <!-- beak -->
+  <use href="#beak" fill="#ffe08a" stroke="#3f3d56" stroke-width="5" stroke-linejoin="round"/>
+  <g clip-path="url(#beak-clip)">
+    <circle cx="36" cy="110" r="18" fill="#f2b84b"/>
+  </g>
+  <use href="#beak" fill="none" stroke="#3f3d56" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M92,104 C78,104 66,106 56,108" fill="none" stroke="#3f3d56" stroke-width="4" stroke-linecap="round"/>
+  <ellipse cx="66" cy="91" rx="4" ry="2" fill="#3f3d56"/>
+
+  <!-- eye -->
+  <ellipse cx="118" cy="86" rx="10" ry="12" fill="#2d2b3f"/>
+  <circle cx="122" cy="81" r="4" fill="#fff"/>
+  <circle cx="115" cy="92" r="2" fill="#fff"/>
+
+  <!-- blush -->
+  <ellipse cx="132" cy="108" rx="9" ry="6" fill="#ff8fa3" opacity="0.55"/>
+</svg>

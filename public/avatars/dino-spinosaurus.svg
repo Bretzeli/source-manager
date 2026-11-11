@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img">
+  <title>Spinosaurus</title>
+  <defs>
+    <path id="sail" d="M40,184 C34,122 64,66 112,56 C152,48 180,82 182,152 Z"/>
+    <g id="silhouette">
+      <ellipse cx="118" cy="210" rx="88" ry="54"/>
+      <path d="M150,188 C160,162 170,146 184,132 L214,150 C200,168 196,184 196,212 Z"/>
+      <ellipse cx="194" cy="124" rx="32" ry="26"/>
+      <rect x="194" y="112" width="46" height="26" rx="13"/>
+    </g>
+    <clipPath id="sail-clip">
+      <use href="#sail"/>
+    </clipPath>
+    <mask id="silhouette-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <use href="#silhouette" fill="#fff"/>
+    </mask>
+  </defs>
+  <rect width="256" height="256" fill="#fff6d6"/>
+
+  <!-- sail -->
+  <use href="#sail" fill="#ff8a8a"/>
+  <g clip-path="url(#sail-clip)" fill="none" stroke="#e86a6a" stroke-width="5" stroke-linecap="round">
+    <path d="M110,200 L20,150"/>
+    <path d="M110,200 L30,100"/>
+    <path d="M110,200 L60,50"/>
+    <path d="M110,200 L104,30"/>
+    <path d="M110,200 L150,36"/>
+    <path d="M110,200 L190,70"/>
+  </g>
+  <use href="#sail" fill="none" stroke="#3f3d56" stroke-width="5" stroke-linejoin="round"/>
+
+  <use href="#silhouette" fill="#3f3d56" stroke="#3f3d56" stroke-width="10" stroke-linejoin="round"/>
+  <use href="#silhouette" fill="#6fb2ea"/>
+
+  <g mask="url(#silhouette-mask)">
+    <!-- lower jaw, throat + belly -->
+    <path d="M198,134 Q218,141 236,130 L250,170 L186,170 Z" fill="#cde6fb"/>
+    <path d="M196,212 C196,184 200,168 214,150 L196,146 C184,166 178,186 178,212 Z" fill="#cde6fb"/>
+    <ellipse cx="150" cy="240" rx="56" ry="32" fill="#cde6fb"/>
+    <!-- spots -->
+    <g fill="#5a9bd6">
+      <circle cx="58" cy="192" r="9"/>
+      <circle cx="84" cy="178" r="6"/>
+      <circle cx="44" cy="218" r="6"/>
+      <circle cx="176" cy="104" r="4"/>
+    </g>
+  </g>
+
+  <g stroke="#3f3d56" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <!-- smile + tooth -->
+    <path d="M198,134 Q218,141 236,130" fill="none"/>
+    <path d="M212,137 L221,137 L216,145 Z" fill="#fff" stroke-width="3"/>
+  </g>
+
+  <!-- arm -->
+  <path d="M184,198 Q206,196 212,214" fill="none" stroke="#3f3d56" stroke-width="18" stroke-linecap="round"/>
+  <path d="M184,198 Q206,196 212,214" fill="none" stroke="#6fb2ea" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- nostril -->
+  <ellipse cx="232" cy="119" rx="3" ry="2.5" fill="#3f3d56"/>
+
+  <!-- eye -->
+  <ellipse cx="192" cy="113" rx="9" ry="11" fill="#2d2b3f"/>
+  <circle cx="196" cy="108" r="3.5" fill="#fff"/>
+  <circle cx="189" cy="118" r="1.8" fill="#fff"/>
+
+  <!-- blush -->
+  <ellipse cx="178" cy="132" rx="8" ry="5" fill="#ff8fa3" opacity="0.55"/>
+</svg>

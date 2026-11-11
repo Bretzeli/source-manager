@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img">
+  <title>Brontosaurus</title>
+  <defs>
+    <g id="silhouette">
+      <ellipse cx="104" cy="214" rx="94" ry="58"/>
+      <path d="M116,186 C120,132 128,100 146,78 L202,94 C186,122 178,152 190,194 Z"/>
+      <ellipse cx="176" cy="74" rx="44" ry="32"/>
+    </g>
+    <mask id="silhouette-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <use href="#silhouette" fill="#fff"/>
+    </mask>
+  </defs>
+  <rect width="256" height="256" fill="#e7f6ec"/>
+
+  <use href="#silhouette" fill="#3f3d56" stroke="#3f3d56" stroke-width="10" stroke-linejoin="round"/>
+  <use href="#silhouette" fill="#a596ff"/>
+
+  <g mask="url(#silhouette-mask)">
+    <!-- belly + throat -->
+    <ellipse cx="112" cy="254" rx="66" ry="30" fill="#d3ccff"/>
+    <path d="M190,194 C178,152 186,122 202,94 L184,90 C168,120 160,152 168,194 Z" fill="#d3ccff"/>
+    <!-- spots -->
+    <g fill="#8b7bf2">
+      <circle cx="62" cy="180" r="11"/>
+      <circle cx="92" cy="166" r="7"/>
+      <circle cx="38" cy="204" r="7"/>
+      <circle cx="132" cy="144" r="6"/>
+      <circle cx="140" cy="116" r="5"/>
+      <circle cx="160" cy="52" r="5"/>
+    </g>
+  </g>
+
+  <!-- smile -->
+  <path d="M192,88 Q203,95 213,85" fill="none" stroke="#3f3d56" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- nostril -->
+  <ellipse cx="208" cy="66" rx="3" ry="2.5" fill="#3f3d56"/>
+
+  <!-- eye -->
+  <ellipse cx="182" cy="66" rx="9" ry="11" fill="#2d2b3f"/>
+  <circle cx="186" cy="61" r="3.5" fill="#fff"/>
+  <circle cx="179" cy="71" r="1.8" fill="#fff"/>
+
+  <!-- blush -->
+  <ellipse cx="168" cy="86" rx="9" ry="5.5" fill="#ff8fa3" opacity="0.55"/>
+</svg>
