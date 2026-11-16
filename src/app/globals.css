@@ -129,3 +129,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Sources card view: secondary controls (add-field chips, editor buttons) only appear on hover/focus
+   for mouse users, so cards stay calm. Touch devices (no hover) always see them. */
+@media (hover: hover) {
+  .source-card .source-card-reveal {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .source-card:hover .source-card-reveal,
+  .source-card:focus-within .source-card-reveal,
+  .source-card .source-card-reveal[data-state="open"] {
+    opacity: 1;
+  }
+}

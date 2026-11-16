@@ -82,3 +82,18 @@ export function savePreferences(
   if (prefs.autoResizeTextarea !== undefined) setCookie(`${prefix}autoResizeTextarea`, prefs.autoResizeTextarea.toString())
 }
 
+
+export type SourcesViewMode = "table" | "cards"
+
+const VIEW_MODE_COOKIE = "sources_view_mode"
+
+/**
+ * Last used sources view (shared across projects). Defaults to the card view.
+ */
+export function loadViewMode(): SourcesViewMode {
+  return getCookie(VIEW_MODE_COOKIE) === "table" ? "table" : "cards"
+}
+
+export function saveViewMode(mode: SourcesViewMode) {
+  setCookie(VIEW_MODE_COOKIE, mode)
+}

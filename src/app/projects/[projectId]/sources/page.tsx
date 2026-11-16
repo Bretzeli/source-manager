@@ -5,6 +5,7 @@ import { useParams } from "next/navigation"
 import { useTranslations } from "@/lib/i18n"
 import { parseBibtex, bibtexToSourceFields } from "@/lib/bibtex"
 import { useSources } from "@/hooks/use-sources"
+import { loadViewMode, saveViewMode, type SourcesViewMode } from "@/lib/sources-preferences"
 import { formatPublicationDate } from "@/lib/sources-utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -51,13 +52,23 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize, FileDown, Expand } from "lucide-react"
+import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize, FileDown, Expand, Table2, LayoutGrid, ArrowUpNarrowWide, ArrowDownWideNarrow, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ColumnKey, Source } from "@/types/sources"
 import { PDFExportDialog } from "@/components/pdf-export-dialog"
 import { PREDEFINED_COLORS } from "./constants"
 import { renderLinks } from "./utils/render-links"
 import { ColumnSettingsContent } from "./components/ColumnSettingsContent"
+import { SourceTagsPopoverContent } from "./components/SourceTagsPopoverContent"
+import {
+  SourceCardView,
+  CARD_COLLAPSIBLE_COLUMNS,
+  cardSectionKey,
+  type CardCollapsibleColumn,
+} from "./components/SourceCardView"
+
+const CARD_SORT_COLUMNS: ColumnKey[] = ["title", "abbreviation", "authors", "publicationDate"]
 import { InlineSourceCellEditor } from "./inline-source-cell-editor"
 import { ProjectNavbarSync } from "@/components/project-navbar-sync"
 import {
@@ -114,6 +125,9 @@ export default function SourcesPage() {
     citationUsageFilter,
     setCitationUsageFilter,
     sortColumn,
+    setSortColumn,
+    sortDirection,
+    setSortDirection,
     pageSize,
     setPageSize,
     currentPage,
@@ -213,6 +227,13 @@ export default function SourcesPage() {
   const [deleteTagDialogOpen, setDeleteTagDialogOpen] = React.useState(false)
   const [tagToDelete, setTagToDelete] = React.useState<{ id: string; name: string } | null>(null)
   const [fullScreen, setFullScreen] = React.useState(false)
+  // Read lazily from the cookie: the first (server) render only shows the loading spinner, so this can't cause a hydration mismatch.
+  const [viewMode, setViewModeState] = React.useState<SourcesViewMode>(loadViewMode)
+  const setViewMode = (mode: SourcesViewMode) => {
+    setViewModeState(mode)
+    saveViewMode(mode)
+  }
+  const [expandedCardSections, setExpandedCardSections] = React.useState<Set<string>>(() => new Set())
   const [cellDimensions, setCellDimensions] = React.useState<{ width: number; height: number } | null>(null)
   const [richTextFontSize, setRichTextFontSize] = React.useState("14")
   const [richTextMarkdownMode, setRichTextMarkdownMode] = React.useState(false)
@@ -322,6 +343,37 @@ export default function SourcesPage() {
       column,
       initialValue: value || "",
       initialMarkdownMode,
+    })
+  }
+
+  const toggleCardSection = (sourceId: string, column: CardCollapsibleColumn, open: boolean) => {
+    setExpandedCardSections((prev) => {
+      const key = cardSectionKey(sourceId, column)
+      if (prev.has(key) === open) return prev
+      const next = new Set(prev)
+      if (open) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
+
+  // Non-empty long fields of the cards on the current page; these are what "Expand all" opens.
+  const expandableCardSectionKeys = paginatedSources.flatMap((source) =>
+    CARD_COLLAPSIBLE_COLUMNS.filter(
+      (col) => visibleColumns.includes(col) && source[col]?.trim()
+    ).map((col) => cardSectionKey(source.id, col))
+  )
+  const allCardSectionsExpanded =
+    expandableCardSectionKeys.length > 0 && expandableCardSectionKeys.every((key) => expandedCardSections.has(key))
+
+  const setAllCardSectionsExpanded = (expand: boolean) => {
+    setExpandedCardSections((prev) => {
+      const next = new Set(prev)
+      for (const key of expandableCardSectionKeys) {
+        if (expand) next.add(key)
+        else next.delete(key)
+      }
+      return next
     })
   }
 
@@ -545,9 +597,30 @@ export default function SourcesPage() {
           <Trash2 className="mr-2 h-4 w-4" />
           Delete All Sources
         </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{t.sources.viewMode.label}</span>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            value={viewMode}
+            onValueChange={(v) => {
+              if (v === "table" || v === "cards") setViewMode(v)
+            }}
+            aria-label={t.sources.viewMode.label}
+          >
+            <ToggleGroupItem value="cards" aria-label={t.sources.viewMode.cards}>
+              <LayoutGrid className="mr-1 h-4 w-4" />
+              {t.sources.viewMode.cards}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="table" aria-label={t.sources.viewMode.table}>
+              <Table2 className="mr-1 h-4 w-4" />
+              {t.sources.viewMode.table}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
       </div>
 
-      {/* Table of sources */}
+      {/* Sources: table or card view */}
       {sources.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
           <p className="text-muted-foreground mb-6">{t.sources.noSources}</p>
@@ -558,7 +631,64 @@ export default function SourcesPage() {
         </div>
       ) : (
         <>
-          <div className={`flex items-center gap-4 mb-2 ${fullScreen ? "mx-4" : ""}`}>
+          <div className={`flex flex-wrap items-center gap-4 mb-2 ${fullScreen ? "mx-4" : ""}`}>
+            {viewMode === "cards" ? (
+              <>
+                <div className="flex items-center gap-1">
+                  <Select
+                    value={sortColumn ?? "none"}
+                    onValueChange={(v) => {
+                      setSortColumn(v === "none" ? null : (v as ColumnKey))
+                      setSortDirection("asc")
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-[190px]" aria-label={t.sources.cardView.sortBy}>
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t.sources.cardView.defaultOrder}</SelectItem>
+                      {CARD_SORT_COLUMNS.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {getColumnLabel(col)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {sortColumn && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
+                      title={sortDirection === "asc" ? t.sources.cardView.ascending : t.sources.cardView.descending}
+                      aria-label={sortDirection === "asc" ? t.sources.cardView.ascending : t.sources.cardView.descending}
+                    >
+                      {sortDirection === "asc" ? <ArrowUpNarrowWide className="h-4 w-4" /> : <ArrowDownWideNarrow className="h-4 w-4" />}
+                    </Button>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAllCardSectionsExpanded(!allCardSectionsExpanded)}
+                  disabled={expandableCardSectionKeys.length === 0}
+                >
+                  {allCardSectionsExpanded ? (
+                    <>
+                      <ChevronsDownUp className="mr-2 h-4 w-4" />
+                      {t.sources.cardView.collapseAll}
+                    </>
+                  ) : (
+                    <>
+                      <ChevronsUpDown className="mr-2 h-4 w-4" />
+                      {t.sources.cardView.expandAll}
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+            <>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="keep-table-width"
@@ -579,6 +709,8 @@ export default function SourcesPage() {
                 {t.sources.columnSettings.showColumnSeparators}
               </Label>
             </div>
+            </>
+            )}
             <div className="flex-1"></div>
             <Button
               variant="outline"
@@ -599,6 +731,36 @@ export default function SourcesPage() {
               )}
             </Button>
           </div>
+          {viewMode === "cards" ? (
+            <SourceCardView
+              sources={paginatedSources}
+              tags={tags}
+              visibleColumns={visibleColumns}
+              getColumnLabel={getColumnLabel}
+              expandedSections={expandedCardSections}
+              onToggleSection={toggleCardSection}
+              editingCell={editingCell}
+              editValue={editValue}
+              cellDimensions={cellDimensions}
+              autoResizeTextarea={autoResizeTextarea}
+              richTextFontSize={richTextFontSize}
+              richTextMarkdownMode={richTextMarkdownMode}
+              wide={fullScreen}
+              onStartEdit={(sourceId, col, value, dims) => {
+                setCellDimensions(dims)
+                handleCellDoubleClick(sourceId, col, value)
+              }}
+              onCommit={(value) => void handleCellSave(value)}
+              onCancel={handleCellCancel}
+              onClearCellDimensions={() => setCellDimensions(null)}
+              onOpenRichText={openRichTextEditor}
+              onUpdateTags={handleUpdateSourceTags}
+              onCreateTag={(sourceId) => openCreateTagDialog({ mode: "existing-source", sourceId })}
+              onCopyBibtex={handleCopyBibtex}
+              onGenerateBibtex={handleAutoGenerateBibtex}
+              onDelete={handleDeleteClick}
+            />
+          ) : (
           <div className={`border rounded-lg ${fullScreen ? "w-screen ml-[calc(-50vw+50%)] mr-[calc(-50vw+50%)]" : ""}`}>
             <Table className="table-fixed w-full">
               <TableHeader>
@@ -710,42 +872,14 @@ export default function SourcesPage() {
                                   </Button>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-80" onWheelCapture={(event) => event.stopPropagation()}>
-                                  <div className="space-y-4">
-                                    <Label>{t.sources.addDialog.tags}</Label>
-                                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                                      {tags.map((tag) => (
-                                        <div key={tag.id} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            checked={source.tags.some((t) => t.id === tag.id)}
-                                            onCheckedChange={async (checked) => {
-                                              const currentTagIds = source.tags.map((t) => t.id)
-                                              const newTagIds = checked
-                                                ? [...currentTagIds, tag.id]
-                                                : currentTagIds.filter((id) => id !== tag.id)
-
-                                              handleUpdateSourceTags(source.id, newTagIds)
-                                            }}
-                                          />
-                                          <Label className="flex items-center gap-2 cursor-pointer">
-                                            <Badge
-                                              style={{ backgroundColor: tag.color, color: "white", borderColor: tag.color }}
-                                              variant="outline"
-                                            >
-                                              {tag.name}
-                                            </Badge>
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </div>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => openCreateTagDialog({ mode: "existing-source", sourceId: source.id })}
-                                    >
-                                      <Plus className="mr-2 h-4 w-4" />
-                                      {t.sources.addDialog.createTag}
-                                    </Button>
-                                  </div>
+                                  <SourceTagsPopoverContent
+                                    source={source}
+                                    tags={tags}
+                                    label={t.sources.addDialog.tags}
+                                    createTagLabel={t.sources.addDialog.createTag}
+                                    onUpdateTags={handleUpdateSourceTags}
+                                    onCreateTag={(sourceId) => openCreateTagDialog({ mode: "existing-source", sourceId })}
+                                  />
                                 </PopoverContent>
                               </Popover>
                             ) : col === "bibtex" ? (
@@ -821,6 +955,7 @@ export default function SourcesPage() {
               </TableBody>
             </Table>
           </div>
+          )}
 
           {/* Pagination */}
           <div className={`mt-4 flex items-center justify-between ${fullScreen ? "mx-4" : ""}`}>
