@@ -12,8 +12,7 @@ import { getCitationsFromGithub } from "@/app/actions/citations"
 import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
 import { loadPreferences, savePreferences } from "@/lib/sources-preferences"
 import { parseImportFile, exportToCSV, exportToJSON, formatPublicationDate, sanitizeFilename } from "@/lib/sources-utils"
-import { downloadPDF } from "@/lib/pdf-export"
-import type { PDFExportConfig } from "@/components/pdf-export-dialog"
+import type { PdfExportConfig } from "@/lib/pdf-export/config"
 import type { Source, Tag, ColumnKey, ImportSourceData } from "@/types/sources"
 import { COLUMN_ORDER } from "@/types/sources"
 
@@ -25,7 +24,7 @@ type CreateTagContext =
 export function useSources() {
   const params = useParams()
   const projectId = params.projectId as string
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
 
   const [sources, setSources] = useState<Source[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -1022,19 +1021,27 @@ export function useSources() {
     setPdfExportDialogOpen(true)
   }
 
-  const handlePdfExport = (config: PDFExportConfig) => {
+  const handlePdfExport = async (config: PdfExportConfig, exportSources: Source[]) => {
+    const tp = t.sources.pdfExport
     try {
-      downloadPDF(
-        filteredAndSortedSources,
+      // The PDF engine and its fonts are only loaded when someone actually exports.
+      const { downloadSourcesPdf } = await import("@/lib/pdf-export/export")
+      await downloadSourcesPdf({
+        sources: exportSources,
         config,
-        projectName,
-        projectDescription,
-        citationData
-      )
-      toast.success("PDF exported successfully")
+        project: {
+          title: projectName,
+          description: projectDescription,
+          url: `${window.location.origin}/projects/${projectId}/sources`,
+        },
+        strings: tp.document,
+        locale,
+        fileName: `${sanitizeFilename(projectName)}_${t.sources.title.toLowerCase()}_${new Date().toISOString().split("T")[0]}.pdf`,
+      })
+      toast.success(tp.success)
       setPdfExportDialogOpen(false)
     } catch (error) {
-      toast.error("Failed to export PDF")
+      toast.error(tp.error)
       console.error(error)
     }
   }

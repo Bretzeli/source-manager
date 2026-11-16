@@ -1,6 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import { useMemo, useState, type ReactNode } from "react"
+import { useTheme } from "next-themes"
+import { FileDown, Loader2, Moon, Sun } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -11,399 +13,329 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import type { Source, ColumnKey } from "@/types/sources"
-import { COLUMN_ORDER } from "@/types/sources"
-import { useTranslations } from "@/lib/i18n"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useActiveTheme } from "@/components/active-theme-provider"
+import { PdfExportPreview } from "@/components/pdf-export-preview"
 import { useSession } from "@/lib/auth-client"
-
-export type PDFExportConfig = {
-  // Which values to include
-  includedColumns: Set<ColumnKey>
-  includeAPACitation: boolean
-  includeCitationCount: boolean
-  
-  // Sorting
-  sortBy: "title-asc" | "title-desc" | "date" | "abbreviation" | "apa"
-  sortDirection: "asc" | "desc"
-  
-  // Display format
-  format: "tabular" | "list"
-  
-  // Page options
-  noPageOverlap: boolean
-  newSourceForEachPage: boolean
-  
-  // Font options
-  font: string
-  fontSize: number
-  
-  // Header options
-  includeProjectTitle: boolean
-  includeProjectDescription: boolean
-  includeAuthor: boolean
-  authorName: string
-  includeDownloadDate: boolean
-  includeSourceManagerNote: boolean
-}
-
-const DEFAULT_CONFIG: PDFExportConfig = {
-  includedColumns: new Set(["abbreviation", "title", "authors", "publicationDate", "tags", "description", "notes", "links"]),
-  includeAPACitation: false,
-  includeCitationCount: false,
-  sortBy: "title-asc",
-  sortDirection: "asc",
-  format: "list",
-  noPageOverlap: true,
-  newSourceForEachPage: false,
-  font: "Times New Roman",
-  fontSize: 12,
-  includeProjectTitle: true,
-  includeProjectDescription: false,
-  includeAuthor: false,
-  authorName: "",
-  includeDownloadDate: false,
-  includeSourceManagerNote: false,
-}
+import { useTranslations } from "@/lib/i18n"
+import { appThemes, type AppThemeId } from "@/lib/theme-config"
+import { createDefaultPdfConfig, PDF_SORT_KEYS, type PdfExportConfig, type PdfSortKey } from "@/lib/pdf-export/config"
+import { getPdfPalette } from "@/lib/pdf-export/palette"
+import { sortSourcesForPdf } from "@/lib/pdf-export/sort"
+import type { ColumnKey, Source } from "@/types/sources"
+import { COLUMN_ORDER } from "@/types/sources"
 
 interface PDFExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  sources: Source[]
+  allSources: Source[]
+  /** Sources matching the table's current search and filters. */
+  filteredSources: Source[]
   projectTitle: string
   projectDescription: string | null
-  citationData: { sourceUsage: Record<string, number> } | null
-  columnVisibility: Record<ColumnKey, boolean>
-  onExport: (config: PDFExportConfig) => void
+  onExport: (config: PdfExportConfig, sources: Source[]) => Promise<void>
 }
 
-const AVAILABLE_FONTS = [
-  "Times New Roman",
-  "Helvetica",
-  "Courier",
-  "Arial",
-  "Calibri",
-  "Georgia",
-  "Verdana",
-]
+const PREVIEW_WIDTH = 252
 
-export function PDFExportDialog({
-  open,
-  onOpenChange,
-  sources,
-  projectTitle,
-  projectDescription,
-  citationData,
-  columnVisibility,
-  onExport,
-}: PDFExportDialogProps) {
-  const { t } = useTranslations()
-  const { data: session } = useSession()
-  const [config, setConfig] = useState<PDFExportConfig>(() => {
-    // Initialize with currently visible columns
-    const visibleColumns = COLUMN_ORDER.filter(col => columnVisibility[col])
-    return {
-      ...DEFAULT_CONFIG,
-      includedColumns: new Set(visibleColumns),
-      authorName: session?.user?.name || "",
-    }
-  })
+const fill = (template: string, values: Record<string, string | number>) =>
+  template.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match))
 
-  // Update author name when session loads
-  useEffect(() => {
-    if (session?.user?.name && !config.authorName) {
-      setConfig(prev => ({ ...prev, authorName: session.user.name || "" }))
-    }
-  }, [session?.user?.name])
-
-  const handleColumnToggle = (column: ColumnKey, checked: boolean) => {
-    const newSet = new Set(config.includedColumns)
-    if (checked) {
-      newSet.add(column)
-    } else {
-      newSet.delete(column)
-    }
-    setConfig({ ...config, includedColumns: newSet })
-  }
-
-  const handleExport = () => {
-    onExport(config)
-  }
-
+export function PDFExportDialog(props: PDFExportDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{t.sources.pdfExport.title}</DialogTitle>
-          <DialogDescription>
-            {t.sources.pdfExport.description}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-6 py-4">
-          {/* Which values to include */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">{t.sources.pdfExport.includeValues}</Label>
-            <div className="space-y-2 pl-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">{t.sources.pdfExport.columns}</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {COLUMN_ORDER.map((col) => (
-                    <div key={col} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={`col-${col}`}
-                        checked={config.includedColumns.has(col)}
-                        onCheckedChange={(checked) =>
-                          handleColumnToggle(col, checked as boolean)
-                        }
-                      />
-                      <Label
-                        htmlFor={`col-${col}`}
-                        className="text-sm font-normal cursor-pointer"
-                      >
-                        {t.sources.columns[col]}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center space-x-2 pt-2">
-                <Checkbox
-                  id="apa-citation"
-                  checked={config.includeAPACitation}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeAPACitation: checked as boolean })
-                  }
-                />
-                <Label htmlFor="apa-citation" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.apaCitation}
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="citation-count"
-                  checked={config.includeCitationCount}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeCitationCount: checked as boolean })
-                  }
-                />
-                <Label htmlFor="citation-count" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.citationCount}
-                </Label>
-              </div>
-            </div>
-          </div>
-
-          {/* Sorting */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">{t.sources.pdfExport.sorting}</Label>
-            <Select
-              value={config.sortBy}
-              onValueChange={(value: PDFExportConfig["sortBy"]) =>
-                setConfig({ ...config, sortBy: value })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="title-asc">{t.sources.pdfExport.sortByTitleAsc}</SelectItem>
-                <SelectItem value="title-desc">{t.sources.pdfExport.sortByTitleDesc}</SelectItem>
-                <SelectItem value="date">{t.sources.pdfExport.sortByDate}</SelectItem>
-                <SelectItem value="abbreviation">{t.sources.pdfExport.sortByAbbreviation}</SelectItem>
-                <SelectItem value="apa">{t.sources.pdfExport.sortByAPA}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Display format */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">{t.sources.pdfExport.displayFormat}</Label>
-            <RadioGroup
-              value={config.format}
-              onValueChange={(value: "tabular" | "list") =>
-                setConfig({ ...config, format: value })
-              }
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="tabular" id="format-tabular" />
-                <Label htmlFor="format-tabular" className="cursor-pointer">
-                  {t.sources.pdfExport.formatTabular}
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="list" id="format-list" />
-                <Label htmlFor="format-list" className="cursor-pointer">
-                  {t.sources.pdfExport.formatList}
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          {/* Page options */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">{t.sources.pdfExport.pageOptions}</Label>
-            <div className="space-y-2 pl-4">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="no-page-overlap"
-                  checked={config.noPageOverlap}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, noPageOverlap: checked as boolean })
-                  }
-                />
-                <Label htmlFor="no-page-overlap" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.noPageOverlap}
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="new-source-each-page"
-                  checked={config.newSourceForEachPage}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, newSourceForEachPage: checked as boolean })
-                  }
-                />
-                <Label htmlFor="new-source-each-page" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.newPagePerSource}
-                </Label>
-              </div>
-            </div>
-          </div>
-
-          {/* Font options */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">{t.sources.pdfExport.fontOptions}</Label>
-            <div className="grid grid-cols-2 gap-4 pl-4">
-              <div className="space-y-2">
-                <Label className="text-sm">{t.sources.pdfExport.font}</Label>
-                <Select
-                  value={config.font}
-                  onValueChange={(value) => setConfig({ ...config, font: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AVAILABLE_FONTS.map((font) => (
-                      <SelectItem key={font} value={font}>
-                        {font}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm">{t.sources.pdfExport.fontSize}</Label>
-                <Input
-                  type="number"
-                  value={config.fontSize}
-                  onChange={(e) =>
-                    setConfig({ ...config, fontSize: parseInt(e.target.value) || 12 })
-                  }
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Header options */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">{t.sources.pdfExport.headerOptions}</Label>
-            <div className="space-y-2 pl-4">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="include-project-title"
-                  checked={config.includeProjectTitle}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeProjectTitle: checked as boolean })
-                  }
-                />
-                <Label htmlFor="include-project-title" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.includeProjectTitle}
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="include-project-description"
-                  checked={config.includeProjectDescription}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeProjectDescription: checked as boolean })
-                  }
-                />
-                <Label htmlFor="include-project-description" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.includeProjectDescription}
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="include-author"
-                  checked={config.includeAuthor}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeAuthor: checked as boolean })
-                  }
-                />
-                <Label htmlFor="include-author" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.includeAuthor}
-                </Label>
-              </div>
-              {config.includeAuthor && (
-                <div className="pl-6">
-                  <Input
-                    placeholder={t.sources.pdfExport.authorNamePlaceholder}
-                    value={config.authorName}
-                    onChange={(e) =>
-                      setConfig({ ...config, authorName: e.target.value })
-                    }
-                  />
-                </div>
-              )}
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="include-download-date"
-                  checked={config.includeDownloadDate}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeDownloadDate: checked as boolean })
-                  }
-                />
-                <Label htmlFor="include-download-date" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.includeDownloadDate}
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="include-source-manager-note"
-                  checked={config.includeSourceManagerNote}
-                  onCheckedChange={(checked) =>
-                    setConfig({ ...config, includeSourceManagerNote: checked as boolean })
-                  }
-                />
-                <Label htmlFor="include-source-manager-note" className="text-sm font-normal cursor-pointer">
-                  {t.sources.pdfExport.includeSourceManagerNote}
-                </Label>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t.sources.pdfExport.cancel}
-          </Button>
-          <Button onClick={handleExport}>
-            {t.sources.pdfExport.export}
-          </Button>
-        </DialogFooter>
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[880px]">
+        {/* Mounted per opening, so every export starts from the defaults (current mode and theme). */}
+        <PdfExportForm {...props} />
       </DialogContent>
     </Dialog>
   )
 }
 
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3.5">
+      <h3 className="text-muted-foreground text-xs font-medium tracking-wider uppercase">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function OptionRow({
+  id,
+  label,
+  hint,
+  checked,
+  disabled,
+  onCheckedChange,
+  children,
+}: {
+  id: string
+  label: string
+  hint?: string
+  checked: boolean
+  disabled?: boolean
+  onCheckedChange: (checked: boolean) => void
+  children?: ReactNode
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-start justify-between gap-6">
+        <Label htmlFor={id} className="flex flex-col items-start gap-1 leading-snug">
+          <span>{label}</span>
+          {hint ? <span className="text-muted-foreground text-xs font-normal">{hint}</span> : null}
+        </Label>
+        <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} className="mt-0.5" />
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function ThemeSwatch({ themeId, mode }: { themeId: AppThemeId; mode: PdfExportConfig["mode"] }) {
+  const palette = getPdfPalette(themeId, mode)
+  return (
+    <span
+      className="ring-border inline-flex size-4 shrink-0 items-center justify-center rounded-full ring-1"
+      style={{ backgroundColor: palette.paper }}
+    >
+      <span className="size-2 rounded-full" style={{ backgroundColor: palette.accent }} />
+    </span>
+  )
+}
+
+function PdfExportForm({
+  onOpenChange,
+  allSources,
+  filteredSources,
+  projectTitle,
+  projectDescription,
+  onExport,
+}: PDFExportDialogProps) {
+  const { t, locale } = useTranslations()
+  const tp = t.sources.pdfExport
+  const { resolvedTheme } = useTheme()
+  const { activeTheme } = useActiveTheme()
+  const { data: session } = useSession()
+
+  const [config, setConfig] = useState<PdfExportConfig>(() =>
+    createDefaultPdfConfig({ mode: resolvedTheme === "dark" ? "dark" : "light", themeId: activeTheme, authorName: "" }),
+  )
+  // null until edited: follows the signed-in user's name, which may arrive after opening.
+  const [authorName, setAuthorName] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const update = <K extends keyof PdfExportConfig>(key: K, value: PdfExportConfig[K]) =>
+    setConfig((current) => ({ ...current, [key]: value }))
+
+  const effectiveConfig: PdfExportConfig = { ...config, authorName: authorName ?? session?.user?.name ?? "" }
+  const selected = config.keepFilters ? filteredSources : allSources
+  const ordered = useMemo(() => sortSourcesForPdf(selected, config.sortBy, locale), [selected, config.sortBy, locale])
+  const hasDescription = Boolean(projectDescription?.trim())
+  const hasContent = config.fields.some((field) => field !== "abbreviation") || config.includeApaCitation
+  const canExport = selected.length > 0 && hasContent && !busy
+
+  const toggleField = (column: ColumnKey, checked: boolean) =>
+    update(
+      "fields",
+      COLUMN_ORDER.filter((candidate) => (candidate === column ? checked : config.fields.includes(candidate))),
+    )
+
+  const handleExport = async () => {
+    setBusy(true)
+    try {
+      await onExport(effectiveConfig, selected)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const countLabel =
+    selected.length === 0
+      ? tp.noSources
+      : selected.length === 1
+        ? tp.sourceCountOne
+        : fill(tp.sourceCount, { count: new Intl.NumberFormat(locale).format(selected.length) })
+
+  return (
+    <>
+      <div className="grid min-h-0 md:grid-cols-[minmax(0,1fr)_316px]">
+        <div className="flex min-h-0 flex-col">
+          <DialogHeader className="px-6 pt-6 pb-5">
+            <DialogTitle>{tp.title}</DialogTitle>
+            <DialogDescription>{tp.description}</DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[min(64vh,620px)] space-y-8 overflow-y-auto px-6 pb-7">
+            <Section title={tp.content}>
+              <div className="space-y-2.5">
+                <p className="text-sm font-medium">{tp.columns}</p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+                  {COLUMN_ORDER.map((column) => (
+                    <Label key={column} htmlFor={`pdf-field-${column}`} className="cursor-pointer font-normal">
+                      <Checkbox
+                        id={`pdf-field-${column}`}
+                        checked={config.fields.includes(column)}
+                        onCheckedChange={(checked) => toggleField(column, checked === true)}
+                      />
+                      {t.sources.columns[column]}
+                    </Label>
+                  ))}
+                </div>
+                {!hasContent ? <p className="text-destructive text-xs">{tp.noColumns}</p> : null}
+              </div>
+              <OptionRow
+                id="pdf-apa"
+                label={tp.apaCitation}
+                hint={tp.apaCitationHint}
+                checked={config.includeApaCitation}
+                onCheckedChange={(checked) => update("includeApaCitation", checked)}
+              />
+            </Section>
+
+            <Section title={tp.selection}>
+              <div className="flex items-center justify-between gap-6">
+                <Label htmlFor="pdf-sort">{tp.sortBy}</Label>
+                <Select value={config.sortBy} onValueChange={(value) => update("sortBy", value as PdfSortKey)}>
+                  <SelectTrigger id="pdf-sort" className="w-[210px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PDF_SORT_KEYS.map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {tp.sort[key]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <OptionRow
+                id="pdf-keep-filters"
+                label={tp.keepFilters}
+                hint={fill(tp.keepFiltersHint, { count: filteredSources.length, total: allSources.length })}
+                checked={config.keepFilters}
+                onCheckedChange={(checked) => update("keepFilters", checked)}
+              />
+            </Section>
+
+            <Section title={tp.appearance}>
+              <div className="flex items-center justify-between gap-6">
+                <Label id="pdf-mode-label">{tp.mode}</Label>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  aria-labelledby="pdf-mode-label"
+                  value={config.mode}
+                  onValueChange={(value) => {
+                    if (value === "light" || value === "dark") update("mode", value)
+                  }}
+                >
+                  <ToggleGroupItem value="light" className="gap-1.5 px-3">
+                    <Sun className="size-3.5" />
+                    {tp.light}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="dark" className="gap-1.5 px-3">
+                    <Moon className="size-3.5" />
+                    {tp.dark}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+              <div className="flex items-center justify-between gap-6">
+                <Label htmlFor="pdf-theme">{tp.theme}</Label>
+                <Select value={config.themeId} onValueChange={(value) => update("themeId", value as AppThemeId)}>
+                  <SelectTrigger id="pdf-theme" className="w-[210px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {appThemes.map((theme) => (
+                      <SelectItem key={theme.id} value={theme.id}>
+                        <ThemeSwatch themeId={theme.id} mode={config.mode} />
+                        {theme.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </Section>
+
+            <Section title={tp.header}>
+              <OptionRow
+                id="pdf-project-title"
+                label={tp.projectTitle}
+                checked={config.includeProjectTitle}
+                onCheckedChange={(checked) => update("includeProjectTitle", checked)}
+              />
+              <OptionRow
+                id="pdf-project-description"
+                label={tp.projectDescription}
+                hint={hasDescription ? undefined : tp.noProjectDescription}
+                checked={config.includeProjectDescription && hasDescription}
+                disabled={!hasDescription}
+                onCheckedChange={(checked) => update("includeProjectDescription", checked)}
+              />
+              <OptionRow
+                id="pdf-author"
+                label={tp.author}
+                checked={config.includeAuthor}
+                onCheckedChange={(checked) => update("includeAuthor", checked)}
+              >
+                {config.includeAuthor ? (
+                  <Input
+                    aria-label={tp.author}
+                    placeholder={tp.authorPlaceholder}
+                    value={effectiveConfig.authorName}
+                    onChange={(event) => setAuthorName(event.target.value)}
+                  />
+                ) : null}
+              </OptionRow>
+              <OptionRow
+                id="pdf-date"
+                label={tp.downloadDate}
+                checked={config.includeDownloadDate}
+                onCheckedChange={(checked) => update("includeDownloadDate", checked)}
+              />
+              <OptionRow
+                id="pdf-credit"
+                label={tp.sourceManagerNote}
+                hint={tp.sourceManagerNoteHint}
+                checked={config.includeSourceManagerNote}
+                onCheckedChange={(checked) => update("includeSourceManagerNote", checked)}
+              />
+            </Section>
+          </div>
+        </div>
+
+        <aside className="bg-muted/40 hidden flex-col items-center gap-4 border-l px-8 pt-14 pb-6 md:flex">
+          <PdfExportPreview
+            sources={ordered}
+            config={{ ...effectiveConfig, includeProjectDescription: config.includeProjectDescription && hasDescription }}
+            projectTitle={projectTitle}
+            projectDescription={projectDescription}
+            strings={tp.document}
+            locale={locale}
+            width={PREVIEW_WIDTH}
+          />
+          <span className="text-muted-foreground text-xs">{tp.preview}</span>
+        </aside>
+      </div>
+
+      <DialogFooter className="items-center border-t px-6 py-4 sm:justify-between">
+        <span className="text-muted-foreground hidden text-sm sm:inline">{countLabel}</span>
+        <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {tp.cancel}
+          </Button>
+          <Button onClick={handleExport} disabled={!canExport}>
+            {busy ? <Loader2 className="animate-spin" /> : <FileDown />}
+            {busy ? tp.generating : tp.download}
+          </Button>
+        </div>
+      </DialogFooter>
+    </>
+  )
+}

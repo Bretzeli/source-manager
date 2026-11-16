@@ -217,7 +217,6 @@ export default function SourcesPage() {
     handlePdfExport,
     projectName,
     projectDescription,
-    citationData,
   } = useSources()
 
   const [isResizing, setIsResizing] = React.useState(false)
@@ -2081,11 +2080,10 @@ export default function SourcesPage() {
       <PDFExportDialog
         open={pdfExportDialogOpen}
         onOpenChange={setPdfExportDialogOpen}
-        sources={filteredAndSortedSources}
+        allSources={sources}
+        filteredSources={filteredAndSortedSources}
         projectTitle={projectName}
         projectDescription={projectDescription}
-        citationData={citationData}
-        columnVisibility={columnVisibility}
         onExport={handlePdfExport}
       />
 
