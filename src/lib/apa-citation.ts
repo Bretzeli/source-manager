@@ -149,27 +149,59 @@ function findUrl(source: Source, fields: Record<string, string>): string | null 
   return match ? match[0] : null
 }
 
-function extractYear(source: Source, fields: Record<string, string>): string {
-  const year = source.publicationDate?.match(/^(\d{4})/)?.[1] ?? fields.year?.match(/\d{4}/)?.[0]
-  return year ?? "n.d."
+export type CitationLanguage = "en" | "de"
+
+/** The few fixed terms of an APA reference (German follows the DGPs adaptation). */
+const TERMS: Record<CitationLanguage, {
+  noDate: string
+  pages: string
+  edition: (n: number) => string
+  report: string
+  doctoral: string
+  masters: string
+}> = {
+  en: {
+    noDate: "n.d.",
+    pages: "pp.",
+    edition: (n) => {
+      const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"
+      return `${n}${suffix} ed.`
+    },
+    report: "Report No.",
+    doctoral: "Doctoral dissertation",
+    masters: "Master's thesis",
+  },
+  de: {
+    noDate: "o. J.",
+    pages: "S.",
+    edition: (n) => `${n}. Aufl.`,
+    report: "Bericht Nr.",
+    doctoral: "Dissertation",
+    masters: "Masterarbeit",
+  },
 }
 
-function editionLabel(edition: string): string {
+function extractYear(source: Source, fields: Record<string, string>, noDate: string): string {
+  const year = source.publicationDate?.match(/^(\d{4})/)?.[1] ?? fields.year?.match(/\d{4}/)?.[0]
+  return year ?? noDate
+}
+
+function editionLabel(edition: string, language: CitationLanguage): string {
   const n = Number.parseInt(edition, 10)
   if (!Number.isFinite(n) || String(n) !== edition.trim()) return edition
-  const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th"
-  return `${n}${suffix}`
+  return TERMS[language].edition(n)
 }
 
 /** Build an APA 7 reference as styled segments. */
-export function generateApaReference(source: Source): CitationSegment[] {
+export function generateApaReference(source: Source, language: CitationLanguage = "en"): CitationSegment[] {
+  const terms = TERMS[language]
   const entry = source.bibtex ? parseBibtex(source.bibtex) : null
   const fields: Record<string, string> = {}
   for (const [key, value] of Object.entries(entry?.fields ?? {})) fields[key] = cleanBibtexValue(value)
   const type = entry?.type ?? "misc"
 
   const authors = formatApaAuthors(parseAuthorNames(source.authors || fields.author))
-  const year = extractYear(source, fields)
+  const year = extractYear(source, fields, terms.noDate)
   const title = (source.title || fields.title || "").trim().replace(/\.$/, "")
   const link = findDoi(source, fields) ?? findUrl(source, fields)
 
@@ -184,10 +216,10 @@ export function generateApaReference(source: Source): CitationSegment[] {
 
   let titleSuffix = ""
   if (!isPart) {
-    if (fields.edition) titleSuffix = ` (${editionLabel(fields.edition)} ed.)`
-    if ((type === "techreport" || type === "report") && fields.number) titleSuffix = ` (Report No. ${fields.number})`
+    if (fields.edition) titleSuffix = ` (${editionLabel(fields.edition, language)})`
+    if ((type === "techreport" || type === "report") && fields.number) titleSuffix = ` (${terms.report} ${fields.number})`
     if (isThesis) {
-      const kind = type === "phdthesis" ? "Doctoral dissertation" : "Master's thesis"
+      const kind = type === "phdthesis" ? terms.doctoral : terms.masters
       titleSuffix = ` [${kind}${fields.school ? `, ${fields.school}` : ""}]`
     }
   }
@@ -229,7 +261,7 @@ export function generateApaReference(source: Source): CitationSegment[] {
     if (container) {
       push("In ")
       push(container, true)
-      if (fields.pages) push(` (pp. ${pageRange(fields.pages)})`)
+      if (fields.pages) push(` (${terms.pages} ${pageRange(fields.pages)})`)
       push(". ")
     }
     if (publisher) push(`${withPeriod(publisher)} `)
@@ -246,8 +278,8 @@ export function generateApaReference(source: Source): CitationSegment[] {
 }
 
 /** Plain-text APA reference. */
-export function generateAPACitation(source: Source): string {
-  return generateApaReference(source)
+export function generateAPACitation(source: Source, language: CitationLanguage = "en"): string {
+  return generateApaReference(source, language)
     .map((segment) => segment.text)
     .join("")
 }

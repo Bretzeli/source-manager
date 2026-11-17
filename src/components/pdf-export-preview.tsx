@@ -5,8 +5,9 @@ import type { Source } from "@/types/sources"
 import { generateAPACitation } from "@/lib/apa-citation"
 import type { PdfDocumentStrings, PdfExportConfig } from "@/lib/pdf-export/config"
 import { formatLongDate, formatPublicationDate } from "@/lib/pdf-export/format"
-import { KEY_SIZE, MARGIN_TOP, MARGIN_X, PAGE, SIZE, keyColumnWidth } from "@/lib/pdf-export/metrics"
+import { KEY_SIZE, MARGIN_TOP, MARGIN_X, PAGE, QR_SIZE, QR_TILE_PADDING, SIZE, keyColumnWidth } from "@/lib/pdf-export/metrics"
 import { getPdfPalette, tagChipColors } from "@/lib/pdf-export/palette"
+import { createQrCode } from "@/lib/pdf-export/qr"
 
 const SERIF = '"Source Serif 4", Georgia, serif'
 const SANS = '"Inter", system-ui, sans-serif'
@@ -24,6 +25,9 @@ function plainText(markdown: string | null | undefined): string {
     .replace(/\s+/g, " ")
     .trim()
 }
+
+const PAGE_FRAME =
+  "relative overflow-hidden rounded-[2px] shadow-[0_1px_2px_rgba(0,0,0,0.08),0_8px_24px_-6px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:ring-white/10"
 
 const clamp = (lines: number): CSSProperties => ({
   display: "-webkit-box",
@@ -81,7 +85,7 @@ export function PdfExportPreview({
 
   return (
     <div
-      className="relative overflow-hidden rounded-[2px] shadow-[0_1px_2px_rgba(0,0,0,0.08),0_8px_24px_-6px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:ring-white/10"
+      className={PAGE_FRAME}
       style={{ width, height: PAGE.height * scale }}
       aria-hidden
     >
@@ -100,9 +104,11 @@ export function PdfExportPreview({
           transition: "background-color 200ms ease, color 200ms ease",
         }}
       >
-        <div style={{ fontFamily: SANS, fontWeight: 600, fontSize: SIZE.overline, letterSpacing: 1.6, textTransform: "uppercase", color: palette.accent }}>
-          {strings.overline}
-        </div>
+        {config.overline.trim() ? (
+          <div style={{ fontFamily: SANS, fontWeight: 600, fontSize: SIZE.overline, letterSpacing: 1.6, textTransform: "uppercase", color: palette.accent }}>
+            {config.overline.trim()}
+          </div>
+        ) : null}
         {config.includeProjectTitle && projectTitle.trim() ? (
           <div style={{ fontSize: SIZE.title, lineHeight: 1.12, letterSpacing: -0.3, marginTop: 14, color: palette.ink, ...clamp(2) }}>
             {projectTitle.trim()}
@@ -219,7 +225,7 @@ export function PdfExportPreview({
                     }}
                   >
                     <div style={label(palette.accent)}>{strings.citeAs}</div>
-                    <div style={{ fontSize: SIZE.citation, lineHeight: 1.5, ...clamp(3) }}>{generateAPACitation(source)}</div>
+                    <div style={{ fontSize: SIZE.citation, lineHeight: 1.5, ...clamp(3) }}>{generateAPACitation(source, config.language)}</div>
                   </div>
                 ) : null}
                 {bibtex ? (
@@ -245,6 +251,65 @@ export function PdfExportPreview({
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+/** The end of the last page: the Source Manager note with its link and optional QR code. */
+export function PdfColophonPreview({
+  config,
+  projectUrl,
+  strings,
+  width,
+}: {
+  config: PdfExportConfig
+  projectUrl: string
+  strings: PdfDocumentStrings
+  width: number
+}) {
+  const palette = useMemo(() => getPdfPalette(config.themeId, config.mode), [config.themeId, config.mode])
+  const qr = useMemo(() => (config.includeQrCode ? createQrCode(projectUrl) : null), [config.includeQrCode, projectUrl])
+  const scale = width / PAGE.width
+  const dark = palette.mode === "dark"
+  const sliceHeight = (config.includeQrCode ? QR_SIZE : 26) + 64
+
+  return (
+    <div className={PAGE_FRAME} style={{ width, height: sliceHeight * scale }} aria-hidden>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: PAGE.width,
+          height: sliceHeight,
+          transform: `scale(${scale})`,
+          transformOrigin: "0 0",
+          background: palette.paper,
+          padding: `30px ${MARGIN_X}px 0`,
+          fontFamily: SANS,
+          fontSize: 7.6,
+          lineHeight: 1.6,
+        }}
+      >
+        <div style={{ width: 18, height: 1.2, marginBottom: 10, background: palette.accent }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {qr ? (
+            <div style={dark ? { background: palette.ink, padding: QR_TILE_PADDING, borderRadius: 3, lineHeight: 0 } : { lineHeight: 0 }}>
+              <svg
+                width={QR_SIZE - (dark ? QR_TILE_PADDING * 2 : 0)}
+                height={QR_SIZE - (dark ? QR_TILE_PADDING * 2 : 0)}
+                viewBox={`0 0 ${qr.size} ${qr.size}`}
+                shapeRendering="crispEdges"
+              >
+                <path d={qr.path} fill={dark ? palette.paper : palette.ink} />
+              </svg>
+            </div>
+          ) : null}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: palette.muted }}>{strings.exportedFrom}</div>
+            <div style={{ color: palette.accent, overflowWrap: "anywhere" }}>{projectUrl.replace(/^https?:\/\//, "")}</div>
+          </div>
+        </div>
       </div>
     </div>
   )

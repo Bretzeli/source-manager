@@ -5,14 +5,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams } from "next/navigation"
 import { toast } from "sonner"
-import { useTranslations } from "@/lib/i18n"
+import { getTranslations, useTranslations } from "@/lib/i18n"
 import { getSources, getTags, createSource, updateSource, deleteSource, deleteAllSources, createTag, updateTag, deleteTag, mergeTags, batchImportSources } from "@/app/actions/sources"
 import { getProject } from "@/app/actions/projects"
 import { getCitationsFromGithub } from "@/app/actions/citations"
 import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
 import { loadPreferences, savePreferences } from "@/lib/sources-preferences"
 import { parseImportFile, exportToCSV, exportToJSON, formatPublicationDate, sanitizeFilename } from "@/lib/sources-utils"
-import type { PdfExportConfig } from "@/lib/pdf-export/config"
+import { projectSourcesUrl, type PdfExportConfig } from "@/lib/pdf-export/config"
+import { chooseSaveTarget, discardSaveTarget, saveBlob } from "@/lib/pdf-export/save"
 import type { Source, Tag, ColumnKey, ImportSourceData } from "@/types/sources"
 import { COLUMN_ORDER } from "@/types/sources"
 
@@ -24,7 +25,7 @@ type CreateTagContext =
 export function useSources() {
   const params = useParams()
   const projectId = params.projectId as string
-  const { t, locale } = useTranslations()
+  const { t } = useTranslations()
 
   const [sources, setSources] = useState<Source[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -1023,24 +1024,32 @@ export function useSources() {
 
   const handlePdfExport = async (config: PdfExportConfig, exportSources: Source[]) => {
     const tp = t.sources.pdfExport
+    const documentText = getTranslations(config.language)
+    const fileName = `${sanitizeFilename(projectName)}_${documentText.sources.title.toLowerCase()}_${new Date().toISOString().split("T")[0]}.pdf`
+    // Ask where to save (and open the file) before anything else: the save dialog needs the
+    // click's user activation, and the file must be opened for writing right after it's chosen.
+    const target = await chooseSaveTarget(fileName)
+    if (target.kind === "cancelled") return
     try {
       // The PDF engine and its fonts are only loaded when someone actually exports.
-      const { downloadSourcesPdf } = await import("@/lib/pdf-export/export")
-      await downloadSourcesPdf({
+      const { renderSourcesPdf } = await import("@/lib/pdf-export/export")
+      const blob = await renderSourcesPdf({
         sources: exportSources,
         config,
         project: {
           title: projectName,
           description: projectDescription,
-          url: `${window.location.origin}/projects/${projectId}/sources`,
+          url: projectSourcesUrl(projectId),
         },
-        strings: tp.document,
-        locale,
-        fileName: `${sanitizeFilename(projectName)}_${t.sources.title.toLowerCase()}_${new Date().toISOString().split("T")[0]}.pdf`,
+        strings: documentText.sources.pdfExport.document,
+        locale: config.language,
       })
-      toast.success(tp.success)
+      const confirmed = await saveBlob(target, blob, fileName)
+      // Only claim success once the file is written; a plain browser download reports itself.
+      if (confirmed) toast.success(tp.success)
       setPdfExportDialogOpen(false)
     } catch (error) {
+      await discardSaveTarget(target)
       toast.error(tp.error)
       console.error(error)
     }

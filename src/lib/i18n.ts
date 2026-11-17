@@ -211,6 +211,16 @@ const translations = {
       generic: "An error occurred. Please try again.",
       invalidCredentials: "Invalid email or password",
     },
+    projectAccess: {
+      signedOutTitle: "Sign in to open this project",
+      signedOutDescription: "This project is private. Sign in with the account it belongs to and you'll be taken straight to it.",
+      signIn: "Sign in",
+      forbiddenTitle: "You don't have access to this project",
+      forbiddenDescription: "It belongs to another account or no longer exists. You're signed in as {name}.",
+      switchAccount: "Use a different account",
+      home: "Go to your projects",
+      homeSignedOut: "Go to the start page",
+    },
     sources: {
       title: "Sources",
       manageSources: "Manage your sources",
@@ -360,11 +370,14 @@ const translations = {
         keepFilters: "Keep current filters",
         keepFiltersHint: "{count} of {total} sources match the table's search and filters",
         appearance: "Appearance",
+        language: "Language",
         mode: "Mode",
         light: "Light",
         dark: "Dark",
         theme: "Theme",
         header: "Title page",
+        heading: "Heading",
+        headingReset: "Reset to default",
         projectTitle: "Project title",
         projectDescription: "Project description",
         noProjectDescription: "This project has no description",
@@ -373,6 +386,9 @@ const translations = {
         authorPlaceholder: "Name",
         sourceManagerNote: "Credit Source Manager",
         sourceManagerNoteHint: "Notes where the data comes from and links to the project",
+        qrCode: "QR code",
+        qrCodeHint: "Adds a scannable code next to the link",
+        lastPage: "Last page",
         sourceCount: "{count} sources",
         sourceCountOne: "1 source",
         noSources: "There are no sources to export.",
@@ -380,7 +396,7 @@ const translations = {
         cancel: "Cancel",
         download: "Download PDF",
         generating: "Typesetting…",
-        success: "PDF downloaded",
+        success: "PDF saved",
         error: "The PDF could not be created",
         document: {
           overline: "Source collection",
@@ -691,6 +707,16 @@ const translations = {
       generic: "Ein Fehler ist aufgetreten. Bitte versuche es erneut.",
       invalidCredentials: "Ungültige E-Mail oder Passwort",
     },
+    projectAccess: {
+      signedOutTitle: "Melde dich an, um dieses Projekt zu öffnen",
+      signedOutDescription: "Dieses Projekt ist privat. Melde dich mit dem Konto an, dem es gehört – danach geht es direkt zum Projekt.",
+      signIn: "Anmelden",
+      forbiddenTitle: "Du hast keinen Zugriff auf dieses Projekt",
+      forbiddenDescription: "Es gehört zu einem anderen Konto oder existiert nicht mehr. Du bist angemeldet als {name}.",
+      switchAccount: "Mit anderem Konto anmelden",
+      home: "Zu deinen Projekten",
+      homeSignedOut: "Zur Startseite",
+    },
     sources: {
       title: "Quellen",
       manageSources: "Verwalte deine Quellen",
@@ -840,11 +866,14 @@ const translations = {
         keepFilters: "Aktuelle Filter beibehalten",
         keepFiltersHint: "{count} von {total} Quellen entsprechen Suche und Filtern der Tabelle",
         appearance: "Darstellung",
+        language: "Sprache",
         mode: "Modus",
         light: "Hell",
         dark: "Dunkel",
         theme: "Theme",
         header: "Titelbereich",
+        heading: "Überschrift",
+        headingReset: "Auf Standard zurücksetzen",
         projectTitle: "Projekttitel",
         projectDescription: "Projektbeschreibung",
         noProjectDescription: "Dieses Projekt hat keine Beschreibung",
@@ -853,6 +882,9 @@ const translations = {
         authorPlaceholder: "Name",
         sourceManagerNote: "Source Manager nennen",
         sourceManagerNoteHint: "Weist auf die Herkunft der Daten hin und verlinkt das Projekt",
+        qrCode: "QR-Code",
+        qrCodeHint: "Ergänzt neben dem Link einen scanbaren Code",
+        lastPage: "Letzte Seite",
         sourceCount: "{count} Quellen",
         sourceCountOne: "1 Quelle",
         noSources: "Es gibt keine Quellen zum Exportieren.",
@@ -860,7 +892,7 @@ const translations = {
         cancel: "Abbrechen",
         download: "PDF herunterladen",
         generating: "Wird gesetzt…",
-        success: "PDF heruntergeladen",
+        success: "PDF gespeichert",
         error: "Das PDF konnte nicht erstellt werden",
         document: {
           overline: "Quellensammlung",
@@ -1052,4 +1084,11 @@ export function useTranslations() {
 }
 
 export type Translations = typeof translations.en
+
+export const LOCALES: Locale[] = ["en", "de"]
+
+/** Translations for a specific locale, e.g. a document language that differs from the UI. */
+export function getTranslations(locale: Locale) {
+  return translations[locale]
+}
 

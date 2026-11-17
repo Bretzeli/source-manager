@@ -7,6 +7,9 @@ export const MARGIN_X = 64
 export const MARGIN_TOP = 62
 export const MARGIN_BOTTOM = 76
 export const KEY_SIZE = 7.4
+/** QR code edge (~22 mm, comfortably scannable in print) and its tile padding on dark paper. */
+export const QR_SIZE = 62
+export const QR_TILE_PADDING = 5
 /** JetBrains Mono advance width per em. */
 export const MONO_ADVANCE = 0.6
 

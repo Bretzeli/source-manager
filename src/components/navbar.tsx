@@ -264,12 +264,12 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
 
             {/* Separator when on project page */}
             {isProjectPage && (
-              <div className="h-6 w-px bg-border" />
+              <div data-project-nav className="h-6 w-px bg-border" />
             )}
 
             {/* Breadcrumb */}
             {isProjectPage && currentProjectName && (
-              <Breadcrumb>
+              <Breadcrumb data-project-nav>
                 <BreadcrumbList>
                   <BreadcrumbItem>
                     <BreadcrumbLink asChild>
@@ -290,7 +290,7 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
             {isProjectPage && currentProjectId && showCompactProjectNav && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Open project navigation">
+                  <Button data-project-nav variant="ghost" size="icon" aria-label="Open project navigation">
                     <Menu className="h-5 w-5" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -314,6 +314,7 @@ export function Navbar({ projectId, projectName }: NavbarProps) {
           {isProjectPage && currentProjectId && (
             <div
               ref={centerNavRef}
+              data-project-nav
               className={`absolute left-1/2 -translate-x-1/2 items-center gap-2 ${
                 showCompactProjectNav ? "invisible pointer-events-none flex" : "flex"
               }`}

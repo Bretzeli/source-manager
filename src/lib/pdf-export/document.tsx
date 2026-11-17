@@ -1,14 +1,15 @@
 import { Fragment, type ReactNode } from "react"
-import { Document, Link, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import { Document, Link, Page, Path, StyleSheet, Svg, Text, View } from "@react-pdf/renderer"
 import type { Style } from "@react-pdf/types"
 import type { Source } from "@/types/sources"
 import { generateApaReference } from "@/lib/apa-citation"
 import { breakable, preserveIndentation } from "./breakable"
 import type { PdfDocumentStrings, PdfExportConfig } from "./config"
 import { FONT } from "./fonts"
-import { KEY_SIZE, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, SIZE, keyColumnWidth } from "./metrics"
+import { KEY_SIZE, MARGIN_BOTTOM, MARGIN_TOP, MARGIN_X, QR_SIZE, QR_TILE_PADDING, SIZE, keyColumnWidth } from "./metrics"
 import { displayUrl, formatLongDate, formatPublicationDate, linkifyLines, plainParagraphs } from "./format"
 import { tagChipColors, type PdfPalette } from "./palette"
+import { createQrCode } from "./qr"
 import { RichText } from "./rich-text"
 
 export type SourcesDocumentProps = {
@@ -121,7 +122,8 @@ const t = StyleSheet.create({
   },
   footerText: { fontFamily: [...FONT.sans], fontSize: SIZE.footer, letterSpacing: 0.3 },
   colophon: { marginTop: 34 },
-  colophonBar: { width: 18, height: 1.2, marginBottom: 9 },
+  colophonBar: { width: 18, height: 1.2, marginBottom: 10 },
+  colophonRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   colophonText: { fontFamily: [...FONT.sans], fontSize: 7.6, lineHeight: 1.6 },
 })
 
@@ -155,7 +157,7 @@ function Masthead({ sources, config, palette, project, strings, locale, generate
 
   return (
     <View style={t.masthead}>
-      <Text style={[t.overline, { color: palette.accent }]}>{strings.overline}</Text>
+      {config.overline.trim() ? <Text style={[t.overline, { color: palette.accent }]}>{config.overline.trim()}</Text> : null}
       {config.includeProjectTitle && project.title.trim() ? (
         <Text style={[t.title, { color: palette.ink }]}>{project.title.trim()}</Text>
       ) : null}
@@ -212,7 +214,7 @@ function Entry({
   const notes = fields.has("notes") ? source.notes?.trim() : ""
   const links = fields.has("links") && source.links?.trim() ? linkifyLines(source.links) : []
   const bibtex = fields.has("bibtex") ? source.bibtex?.trim() : ""
-  const citation = config.includeApaCitation ? generateApaReference(source) : []
+  const citation = config.includeApaCitation ? generateApaReference(source, config.language) : []
 
   const keepTogether = estimateHeight(source, fields, config.includeApaCitation) < 300
   const bookmark = [source.abbreviation?.trim(), title || strings.untitled].filter(Boolean).join("  ·  ")
@@ -320,6 +322,40 @@ function Entry({
   )
 }
 
+/** A QR code for the project link. On dark paper it sits on a light tile: inverted codes don't scan everywhere. */
+function QrMark({ url, palette }: { url: string; palette: PdfPalette }) {
+  const qr = createQrCode(url)
+  const dark = palette.mode === "dark"
+  const size = QR_SIZE - (dark ? QR_TILE_PADDING * 2 : 0)
+  return (
+    <Link src={url} style={{ textDecoration: "none" }}>
+      <View style={dark ? { backgroundColor: palette.ink, padding: QR_TILE_PADDING, borderRadius: 3 } : {}}>
+        <Svg width={size} height={size} viewBox={`0 0 ${qr.size} ${qr.size}`}>
+          <Path d={qr.path} fill={dark ? palette.paper : palette.ink} />
+        </Svg>
+      </View>
+    </Link>
+  )
+}
+
+/** Where the data comes from, with a link (and optionally a QR code) back to the project. */
+function Colophon({ config, palette, project, strings }: SourcesDocumentProps) {
+  return (
+    <View style={t.colophon} wrap={false}>
+      <View style={[t.colophonBar, { backgroundColor: palette.accent }]} />
+      <View style={t.colophonRow}>
+        {config.includeQrCode ? <QrMark url={project.url} palette={palette} /> : null}
+        <View style={{ flex: 1 }}>
+          <Text style={[t.colophonText, { color: palette.muted }]}>{strings.exportedFrom}</Text>
+          <Link src={project.url} style={[t.colophonText, { color: palette.accent, textDecoration: "none" }]}>
+            {breakable(displayUrl(project.url))}
+          </Link>
+        </View>
+      </View>
+    </View>
+  )
+}
+
 export function SourcesDocument(props: SourcesDocumentProps) {
   const { sources, config, palette, project, strings, locale } = props
   const showKeys = config.fields.includes("abbreviation")
@@ -333,9 +369,9 @@ export function SourcesDocument(props: SourcesDocumentProps) {
 
   return (
     <Document
-      title={project.title.trim() || strings.overline}
+      title={project.title.trim() || config.overline.trim() || strings.overline}
       author={config.includeAuthor && config.authorName.trim() ? config.authorName.trim() : undefined}
-      subject={strings.overline}
+      subject={config.overline.trim() || strings.overline}
       creator="Source Manager"
       producer="Source Manager"
       language={locale}
@@ -368,15 +404,7 @@ export function SourcesDocument(props: SourcesDocumentProps) {
           />
         ))}
 
-        {config.includeSourceManagerNote ? (
-          <View style={t.colophon} wrap={false}>
-            <View style={[t.colophonBar, { backgroundColor: palette.accent }]} />
-            <Text style={[t.colophonText, { color: palette.muted }]}>{strings.exportedFrom}</Text>
-            <Link src={project.url} style={[t.colophonText, { color: palette.accent, textDecoration: "none" }]}>
-              {breakable(displayUrl(project.url))}
-            </Link>
-          </View>
-        ) : null}
+        {config.includeSourceManagerNote ? <Colophon {...props} /> : null}
       </Page>
     </Document>
   )

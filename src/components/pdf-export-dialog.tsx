@@ -1,8 +1,9 @@
 "use client"
 
 import { useMemo, useState, type ReactNode } from "react"
+import { useParams } from "next/navigation"
 import { useTheme } from "next-themes"
-import { FileDown, Loader2, Moon, Sun } from "lucide-react"
+import { FileDown, Loader2, Moon, RotateCcw, Sun } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -19,11 +20,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useActiveTheme } from "@/components/active-theme-provider"
-import { PdfExportPreview } from "@/components/pdf-export-preview"
+import { PdfColophonPreview, PdfExportPreview } from "@/components/pdf-export-preview"
 import { useSession } from "@/lib/auth-client"
-import { useTranslations } from "@/lib/i18n"
+import { getTranslations, LOCALES, useTranslations, type Locale } from "@/lib/i18n"
 import { appThemes, type AppThemeId } from "@/lib/theme-config"
-import { createDefaultPdfConfig, PDF_SORT_KEYS, type PdfExportConfig, type PdfSortKey } from "@/lib/pdf-export/config"
+import {
+  createDefaultPdfConfig,
+  PDF_SORT_KEYS,
+  projectSourcesUrl,
+  type PdfExportConfig,
+  type PdfSortKey,
+} from "@/lib/pdf-export/config"
 import { getPdfPalette } from "@/lib/pdf-export/palette"
 import { sortSourcesForPdf } from "@/lib/pdf-export/sort"
 import type { ColumnKey, Source } from "@/types/sources"
@@ -41,6 +48,9 @@ interface PDFExportDialogProps {
 }
 
 const PREVIEW_WIDTH = 252
+
+/** Languages are listed in their own name, whatever the UI language. */
+const LANGUAGE_NAMES: Record<Locale, string> = { en: "English", de: "Deutsch" }
 
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match))
@@ -121,20 +131,44 @@ function PdfExportForm({
   const { resolvedTheme } = useTheme()
   const { activeTheme } = useActiveTheme()
   const { data: session } = useSession()
+  const params = useParams<{ projectId: string }>()
 
   const [config, setConfig] = useState<PdfExportConfig>(() =>
-    createDefaultPdfConfig({ mode: resolvedTheme === "dark" ? "dark" : "light", themeId: activeTheme, authorName: "" }),
+    createDefaultPdfConfig({
+      language: locale,
+      overline: "",
+      mode: resolvedTheme === "dark" ? "dark" : "light",
+      themeId: activeTheme,
+      authorName: "",
+    }),
   )
   // null until edited: follows the signed-in user's name, which may arrive after opening.
   const [authorName, setAuthorName] = useState<string | null>(null)
+  // null until edited: follows the document language ("Source collection" / "Quellensammlung").
+  const [overline, setOverline] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const update = <K extends keyof PdfExportConfig>(key: K, value: PdfExportConfig[K]) =>
     setConfig((current) => ({ ...current, [key]: value }))
 
-  const effectiveConfig: PdfExportConfig = { ...config, authorName: authorName ?? session?.user?.name ?? "" }
+  const documentStrings = getTranslations(config.language).sources.pdfExport.document
+  const effectiveConfig: PdfExportConfig = {
+    ...config,
+    overline: overline ?? documentStrings.overline,
+    authorName: authorName ?? session?.user?.name ?? "",
+  }
   const selected = config.keepFilters ? filteredSources : allSources
-  const ordered = useMemo(() => sortSourcesForPdf(selected, config.sortBy, locale), [selected, config.sortBy, locale])
+  const ordered = useMemo(
+    () => sortSourcesForPdf(selected, config.sortBy, config.language),
+    [selected, config.sortBy, config.language],
+  )
+  const projectUrl = projectSourcesUrl(params.projectId ?? "")
+
+  const changeLanguage = (language: Locale) => {
+    // A heading that still reads like the default is treated as untouched and follows the language.
+    if (overline !== null && overline.trim() === documentStrings.overline) setOverline(null)
+    update("language", language)
+  }
   const hasDescription = Boolean(projectDescription?.trim())
   const hasContent = config.fields.some((field) => field !== "abbreviation") || config.includeApaCitation
   const canExport = selected.length > 0 && hasContent && !busy
@@ -224,6 +258,21 @@ function PdfExportForm({
 
             <Section title={tp.appearance}>
               <div className="flex items-center justify-between gap-6">
+                <Label htmlFor="pdf-language">{tp.language}</Label>
+                <Select value={config.language} onValueChange={(value) => changeLanguage(value as Locale)}>
+                  <SelectTrigger id="pdf-language" className="w-[210px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LOCALES.map((language) => (
+                      <SelectItem key={language} value={language}>
+                        {LANGUAGE_NAMES[language]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center justify-between gap-6">
                 <Label id="pdf-mode-label">{tp.mode}</Label>
                 <ToggleGroup
                   type="single"
@@ -264,6 +313,30 @@ function PdfExportForm({
             </Section>
 
             <Section title={tp.header}>
+              <div className="space-y-2">
+                <Label htmlFor="pdf-heading">{tp.heading}</Label>
+                <div className="relative">
+                  <Input
+                    id="pdf-heading"
+                    value={effectiveConfig.overline}
+                    onChange={(event) => setOverline(event.target.value)}
+                    className={overline !== null ? "pr-9" : undefined}
+                  />
+                  {overline !== null && overline !== documentStrings.overline ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground absolute top-1/2 right-1 size-7 -translate-y-1/2"
+                      onClick={() => setOverline(null)}
+                      title={tp.headingReset}
+                      aria-label={tp.headingReset}
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
               <OptionRow
                 id="pdf-project-title"
                 label={tp.projectTitle}
@@ -305,7 +378,19 @@ function PdfExportForm({
                 hint={tp.sourceManagerNoteHint}
                 checked={config.includeSourceManagerNote}
                 onCheckedChange={(checked) => update("includeSourceManagerNote", checked)}
-              />
+              >
+                {config.includeSourceManagerNote ? (
+                  <div className="border-border ml-1 border-l pl-4">
+                    <OptionRow
+                      id="pdf-qr"
+                      label={tp.qrCode}
+                      hint={tp.qrCodeHint}
+                      checked={config.includeQrCode}
+                      onCheckedChange={(checked) => update("includeQrCode", checked)}
+                    />
+                  </div>
+                ) : null}
+              </OptionRow>
             </Section>
           </div>
         </div>
@@ -316,11 +401,22 @@ function PdfExportForm({
             config={{ ...effectiveConfig, includeProjectDescription: config.includeProjectDescription && hasDescription }}
             projectTitle={projectTitle}
             projectDescription={projectDescription}
-            strings={tp.document}
-            locale={locale}
+            strings={documentStrings}
+            locale={config.language}
             width={PREVIEW_WIDTH}
           />
           <span className="text-muted-foreground text-xs">{tp.preview}</span>
+          {config.includeSourceManagerNote ? (
+            <>
+              <PdfColophonPreview
+                config={effectiveConfig}
+                projectUrl={projectUrl}
+                strings={documentStrings}
+                width={PREVIEW_WIDTH}
+              />
+              <span className="text-muted-foreground -mt-1 text-xs">{tp.lastPage}</span>
+            </>
+          ) : null}
         </aside>
       </div>
 

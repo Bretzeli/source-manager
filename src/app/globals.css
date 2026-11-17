@@ -143,3 +143,9 @@
     opacity: 1;
   }
 }
+
+/* A project page the visitor may not open (ProjectAccessDenied) has no project to navigate.
+   Done in CSS so the navbar never shows the project tabs, not even before hydration. */
+body:has([data-project-access-denied]) [data-project-nav] {
+  display: none;
+}

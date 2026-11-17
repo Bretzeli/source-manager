@@ -13,11 +13,10 @@ export type SourcesPdfRequest = {
   project: { title: string; description: string | null; url: string }
   strings: PdfDocumentStrings
   locale: string
-  fileName: string
 }
 
 /** Typeset the sources as a PDF. */
-export async function renderSourcesPdf(request: Omit<SourcesPdfRequest, "fileName">): Promise<Blob> {
+export async function renderSourcesPdf(request: SourcesPdfRequest): Promise<Blob> {
   await preparePdfFonts(`${window.location.origin}/pdf/fonts`)
 
   const document = (
@@ -32,19 +31,4 @@ export async function renderSourcesPdf(request: Omit<SourcesPdfRequest, "fileNam
     />
   )
   return pdf(document).toBlob()
-}
-
-/** Typeset the sources as a PDF and hand it to the browser as a download. */
-export async function downloadSourcesPdf(request: SourcesPdfRequest): Promise<void> {
-  const blob = await renderSourcesPdf(request)
-  const url = URL.createObjectURL(blob)
-  const link = window.document.createElement("a")
-  link.href = url
-  link.download = request.fileName
-  link.style.display = "none"
-  window.document.body.appendChild(link)
-  link.click()
-  link.remove()
-  // Give the browser a moment to start the download before releasing the blob.
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
