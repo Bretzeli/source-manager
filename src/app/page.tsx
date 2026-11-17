@@ -1,11 +1,14 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useSession } from "@/lib/auth-client"
 import { useAuthModal } from "@/contexts/auth-modal-context"
 import { useTranslations } from "@/lib/i18n"
 import { getProjects, createProject } from "@/app/actions/projects"
+import { importProjectBackup } from "@/lib/project-backup-import"
+import { parseProjectBackup, uniqueProjectTitle, type ProjectBackup } from "@/lib/project-backup"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -20,7 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
-import { Plus, FolderOpen, MoreVertical, Trash2, Pencil } from "lucide-react"
+import { Plus, FolderOpen, MoreVertical, Trash2, Pencil, Upload } from "lucide-react"
 import { toast } from "sonner"
 import {
   DropdownMenu,
@@ -43,7 +46,8 @@ import { deleteProject, updateProjectData } from "@/app/actions/projects"
 export default function Home() {
   const { data: session, isPending: sessionPending } = useSession()
   const { openModal } = useAuthModal()
-  const { t } = useTranslations()
+  const { t, locale } = useTranslations()
+  const router = useRouter()
   const [projects, setProjects] = useState<Array<{
     id: string
     title: string
@@ -64,6 +68,9 @@ export default function Home() {
     description: string
   } | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  const backupFileInputRef = useRef<HTMLInputElement>(null)
+  const [pendingBackup, setPendingBackup] = useState<ProjectBackup | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const loadProjects = async () => {
     try {
@@ -98,6 +105,14 @@ export default function Home() {
     const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`
     window.history.replaceState({}, "", next)
   }, [openModal])
+
+  useEffect(() => {
+    if (!importing) return
+    // An import runs in several requests; leaving midway would leave a partly imported project.
+    const warnBeforeLeaving = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener("beforeunload", warnBeforeLeaving)
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving)
+  }, [importing])
 
   const handleCreateProject = async (formData: FormData) => {
     try {
@@ -172,6 +187,49 @@ export default function Home() {
     }
   }
 
+  const handleBackupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Reset so picking the same file again still triggers a change.
+    e.target.value = ""
+    if (!file) return
+
+    let text: string
+    try {
+      text = await file.text()
+    } catch (error) {
+      console.error(error)
+      toast.error(t.errors.generic)
+      return
+    }
+
+    const result = parseProjectBackup(text)
+    if (!result.ok) {
+      toast.error(t.home.backupImport.errors[result.error])
+      return
+    }
+    setPendingBackup(result.backup)
+  }
+
+  const handleImportConfirm = async () => {
+    if (!pendingBackup) return
+
+    try {
+      setImporting(true)
+      const project = await importProjectBackup(pendingBackup)
+      toast.success(t.home.backupImport.imported.replace("{title}", project.title))
+      setPendingBackup(null)
+      router.push(`/projects/${project.id}/sources`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t.errors.generic)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const importTitle = pendingBackup
+    ? uniqueProjectTitle(pendingBackup.project.title, projects.map((project) => project.title))
+    : null
+
   if (sessionPending || loading) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
@@ -202,13 +260,26 @@ export default function Home() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">{t.home.title}</h1>
-        <p className="text-muted-foreground mt-1">
-          {projects.length === 0
-            ? t.home.noProjects
-            : `${projects.length} ${projects.length === 1 ? t.home.projectCount : t.home.projectCountPlural}`}
-        </p>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">{t.home.title}</h1>
+          <p className="text-muted-foreground mt-1">
+            {projects.length === 0
+              ? t.home.noProjects
+              : `${projects.length} ${projects.length === 1 ? t.home.projectCount : t.home.projectCountPlural}`}
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => backupFileInputRef.current?.click()}>
+          <Upload className="mr-2 h-4 w-4" />
+          {t.home.backupImport.button}
+        </Button>
+        <input
+          ref={backupFileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={handleBackupFileChange}
+        />
       </div>
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
@@ -460,6 +531,66 @@ export default function Home() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pendingBackup !== null}
+        onOpenChange={(open) => {
+          if (!open && !importing) setPendingBackup(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t.home.backupImport.dialogTitle}</DialogTitle>
+            <DialogDescription>{t.home.backupImport.dialogDescription}</DialogDescription>
+          </DialogHeader>
+          {pendingBackup && (
+            <div className="grid gap-4 py-2">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+                <dt className="text-muted-foreground">{t.home.backupImport.projectName}</dt>
+                <dd className="font-medium break-words">{pendingBackup.project.title}</dd>
+                <dt className="text-muted-foreground">{t.home.backupImport.description}</dt>
+                <dd className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words">
+                  {pendingBackup.project.description || (
+                    <span className="text-muted-foreground italic">{t.home.backupImport.noDescription}</span>
+                  )}
+                </dd>
+                <dt className="text-muted-foreground">{t.home.backupImport.backupCreated}</dt>
+                <dd>{new Date(pendingBackup.exportedAt).toLocaleString(locale)}</dd>
+                <dt className="text-muted-foreground">{t.home.backupImport.sources}</dt>
+                <dd>{pendingBackup.sources.length}</dd>
+                <dt className="text-muted-foreground">{t.home.backupImport.tags}</dt>
+                <dd>{pendingBackup.tags.length}</dd>
+                {pendingBackup.project.github && (
+                  <>
+                    <dt className="text-muted-foreground">{t.home.backupImport.githubRepo}</dt>
+                    <dd className="break-all">{pendingBackup.project.github.repoUrl}</dd>
+                  </>
+                )}
+              </dl>
+              {importTitle !== pendingBackup.project.title && (
+                <p className="rounded-md border bg-muted/50 px-3 py-2 text-sm">
+                  {t.home.backupImport.renamed.replace("{title}", importTitle ?? "")}
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingBackup(null)} disabled={importing}>
+              {t.home.cancel}
+            </Button>
+            <Button type="button" onClick={handleImportConfirm} disabled={importing}>
+              {importing ? (
+                <>
+                  <Spinner className="mr-2 h-4 w-4" />
+                  {t.home.backupImport.importing}
+                </>
+              ) : (
+                t.home.backupImport.confirm
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

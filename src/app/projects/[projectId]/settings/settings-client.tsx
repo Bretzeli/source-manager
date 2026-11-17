@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import { useTranslations } from "@/lib/i18n"
 import { GithubRepoSettings } from "@/components/github-repo-settings"
+import { ProjectBackupExport } from "@/components/project-backup-export"
 import { ProjectNavbarSync } from "@/components/project-navbar-sync"
 import { updateProjectData } from "@/app/actions/projects"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -115,6 +116,8 @@ export function SettingsPageClient({
         currentSelectedFiles={currentSelectedFiles}
         hasConnection={hasConnection}
       />
+
+      <ProjectBackupExport projectId={projectId} hasGithubRepo={!!currentRepoUrl} />
     </div>
   )
 }
