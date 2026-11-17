@@ -11,10 +11,11 @@ import { getProject } from "@/app/actions/projects"
 import { getCitationsFromGithub } from "@/app/actions/citations"
 import { parseBibtex, serializeBibtex, bibtexToSourceFields, sourceFieldsToBibtex, bibtexFieldsMatch } from "@/lib/bibtex"
 import { loadPreferences, savePreferences } from "@/lib/sources-preferences"
+import { splitOutsideBraces, stripBraces } from "@/lib/authors"
 import { parseImportFile, exportToCSV, exportToJSON, formatPublicationDate, sanitizeFilename } from "@/lib/sources-utils"
 import { projectSourcesUrl, type PdfExportConfig } from "@/lib/pdf-export/config"
 import { chooseSaveTarget, discardSaveTarget, saveBlob } from "@/lib/pdf-export/save"
-import type { Source, Tag, ColumnKey, ImportSourceData } from "@/types/sources"
+import type { Source, Tag, ColumnKey, ImportSourceData, ImportType } from "@/types/sources"
 import { COLUMN_ORDER } from "@/types/sources"
 
 type CreateTagContext =
@@ -109,7 +110,7 @@ export function useSources() {
 
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
-  const [importType, setImportType] = useState<"csv" | "json" | "miro-csv">("csv")
+  const [importType, setImportType] = useState<ImportType>("csv")
   const [importData, setImportData] = useState<ImportSourceData[]>([])
   const [selectedImportIndices, setSelectedImportIndices] = useState<Set<number>>(new Set())
   const [importing, setImporting] = useState(false)
@@ -301,7 +302,7 @@ export function useSources() {
       source,
       abbreviation: source.abbreviation?.toLowerCase() || "",
       title: source.title?.toLowerCase() || "",
-      authors: source.authors?.toLowerCase() || "",
+      authors: stripBraces(source.authors ?? "").toLowerCase(),
       description: source.description?.toLowerCase() || "",
       notes: source.notes?.toLowerCase() || "",
       links: source.links?.toLowerCase() || "",
@@ -337,7 +338,7 @@ export function useSources() {
       const authorNeedle = authorFilter.toLowerCase()
       filtered = filtered.filter((source) => {
         if (!source.authors) return false
-        return source.authors.toLowerCase().includes(authorNeedle)
+        return stripBraces(source.authors).toLowerCase().includes(authorNeedle)
       })
     }
 
@@ -391,8 +392,9 @@ export function useSources() {
             bVal = b.title
             break
           case "authors":
-            aVal = a.authors
-            bVal = b.authors
+            // Grouping braces ("{World Health Organization}") don't count for sorting
+            aVal = a.authors === null ? null : stripBraces(a.authors)
+            bVal = b.authors === null ? null : stripBraces(b.authors)
             break
           case "publicationDate":
             aVal = a.publicationDate
@@ -454,8 +456,8 @@ export function useSources() {
     const authors = new Set<string>()
     sources.forEach((source) => {
       if (source.authors) {
-        source.authors.split(",").forEach((author) => {
-          const trimmed = author.trim()
+        splitOutsideBraces(source.authors, /,/).forEach((author) => {
+          const trimmed = stripBraces(author).trim()
           if (trimmed) authors.add(trimmed)
         })
       }
@@ -871,7 +873,9 @@ export function useSources() {
     try {
       const importSources = parseImportFile(text, file.name, importType)
       setImportData(importSources)
-      setSelectedImportIndices(new Set(importSources.map((_, index) => index)))
+      setSelectedImportIndices(
+        new Set(importSources.flatMap((source, index) => (source.preselected === false ? [] : [index])))
+      )
 
       const existingBibtex = new Set(sources.filter((s) => s.bibtex).map((s) => s.bibtex!.trim()))
       setExistingBibtexSet(existingBibtex)

@@ -6,7 +6,8 @@
  */
 
 import type { Source } from "@/types/sources"
-import { parseBibtex } from "./bibtex"
+import { isBraceGroup, splitOutsideBraces, stripBraces } from "./authors"
+import { latexToText, parseBibtex } from "./bibtex"
 
 /** A run of reference text; APA italicizes the title of standalone works or the periodical. */
 export type CitationSegment = { text: string; italic?: boolean }
@@ -22,12 +23,17 @@ const NAME_PARTICLES = new Set([
 const ORGANIZATION_PATTERN =
   /(^|[\s(])(inc|ltd|llc|gmbh|ag|e\.\s?v\.?|university|universit[äy]|hochschule|institute?|organi[sz]ation|association|verband|society|gesellschaft|council|rat|ministry|ministerium|bundes\p{L}*|agency|amt|committee|ausschuss|foundation|stiftung|group|gruppe|office|department|commission|kommission|bank|network|consortium|corporation|company|team|project|projekt|centre|center|zentrum|parliament|parlament|union|government|regierung|senate|congress|court|gericht|nations|board|federal|national|european|europ\p{L}*|w3c|ieee|iso|oecd|unesco|nasa)(?=$|[\s),.])/iu
 
-const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length
-const looksLikeGiven = (text: string) => wordCount(text) <= 3 && /^[\p{Lu}][\p{L}.'\-]*(?:\s+[\p{Lu}][\p{L}.'\-]*)*$/u.test(text)
+/** Comma-separated parts; commas inside {braces} don't separate. */
+const commaParts = (text: string) => splitOutsideBraces(text, /,/).map((s) => s.trim())
+/** Words; a {braced group} is one word. */
+const words = (text: string) => splitOutsideBraces(text.trim(), /\s+/).filter(Boolean)
+const wordCount = (text: string) => words(text).length
+const looksLikeGiven = (text: string) =>
+  wordCount(text) <= 3 && /^[\p{Lu}][\p{L}.'\-]*(?:\s+[\p{Lu}][\p{L}.'\-]*)*$/u.test(stripBraces(text))
 
 /** "Doe, Jane" / "García Márquez, Gabriel" / "Doe, J." — but not "Jane Doe, John Smith". */
 function isInvertedName(part: string): boolean {
-  const segments = part.split(",").map((s) => s.trim())
+  const segments = commaParts(part)
   if (segments.length !== 2 || !segments[0] || !segments[1]) return false
   if (wordCount(segments[0]) >= 2 && wordCount(segments[1]) >= 2 && !/^\p{Lu}\.?(\s|$)/u.test(segments[1])) return false
   return wordCount(segments[0]) <= 3 && looksLikeGiven(segments[1])
@@ -35,9 +41,9 @@ function isInvertedName(part: string): boolean {
 
 /** "Doe, Jane, Smith, John" → pairs; "Jane Doe, John Smith" → names. */
 function expandCommaList(part: string): string[] {
-  const segments = part.split(",").map((s) => s.trim()).filter(Boolean)
+  const segments = commaParts(part).filter(Boolean)
   if (segments.length <= 1) return segments
-  if (segments.every((segment) => wordCount(segment) >= 2 && !/^\p{Lu}\.?(\s|$)/u.test(segment.split(/\s+/).at(-1) ?? ""))) {
+  if (segments.every((segment) => wordCount(segment) >= 2 && !/^\p{Lu}\.?(\s|$)/u.test(words(segment).at(-1) ?? ""))) {
     return segments
   }
   if (segments.length % 2 === 0) {
@@ -53,33 +59,44 @@ function expandCommaList(part: string): string[] {
 }
 
 function parseSingleName(raw: string): PersonName | null {
-  const text = raw.replace(/^\{(.*)\}$/, "$1").trim()
+  const name = raw.trim()
+  const text = stripBraces(name).trim()
   if (!text) return null
-  if (raw.trim().startsWith("{") || ORGANIZATION_PATTERN.test(text) || wordCount(text) >= 5) {
+  // A name braced as a whole ("{Barnes and Noble}") is an organization, as in BibTeX.
+  if (isBraceGroup(name) || ORGANIZATION_PATTERN.test(text) || wordCount(text) >= 5) {
     return { family: text, given: [], organization: true }
   }
-  if (text.includes(",")) {
-    const [family, ...rest] = text.split(",").map((s) => s.trim())
-    return { family, given: rest.join(" ").split(/\s+/).filter(Boolean) }
+  const parts = commaParts(name)
+  if (parts.length > 1) {
+    const [family, ...rest] = parts
+    return { family: stripBraces(family), given: words(rest.join(" ")).map(stripBraces) }
   }
-  const words = text.split(/\s+/)
-  if (words.length === 1) return { family: words[0], given: [] }
-  let familyStart = words.length - 1
-  while (familyStart > 1 && NAME_PARTICLES.has(words[familyStart - 1].toLowerCase())) familyStart -= 1
-  return { family: words.slice(familyStart).join(" "), given: words.slice(0, familyStart) }
+  const tokens = words(name)
+  if (tokens.length === 1) return { family: stripBraces(tokens[0]), given: [] }
+  let familyStart = tokens.length - 1
+  while (familyStart > 1 && NAME_PARTICLES.has(tokens[familyStart - 1].toLowerCase())) familyStart -= 1
+  return {
+    family: stripBraces(tokens.slice(familyStart).join(" ")),
+    given: tokens.slice(0, familyStart).map(stripBraces),
+  }
 }
 
-/** Parse the free-form authors field ("Doe, Jane; Smith, John", "Jane Doe and John Smith", …). */
+/**
+ * Parse the free-form authors field ("Doe, Jane; Smith, John", "Jane Doe and John Smith", …).
+ * Separators inside braces don't split names; see lib/authors.ts.
+ */
 export function parseAuthorNames(raw: string | null | undefined): PersonName[] {
   const normalized = (raw ?? "").replace(/\s+/g, " ").trim()
   const etAl = ET_AL.test(normalized)
   const text = normalized.replace(ET_AL, "").trim()
   if (!text) return []
+  const bySemicolon = splitOutsideBraces(text, /;/)
+  const byConjunction = splitOutsideBraces(text, /\s+(?:and|und|&)\s+/i)
   let names: string[]
-  if (text.includes(";")) {
-    names = text.split(";")
-  } else if (/\s(?:and|und|&)\s/i.test(text)) {
-    names = text.split(/\s+(?:and|und|&)\s+/i).flatMap((part) => {
+  if (bySemicolon.length > 1) {
+    names = bySemicolon
+  } else if (byConjunction.length > 1) {
+    names = byConjunction.flatMap((part) => {
       const cleaned = part.replace(/,\s*$/, "").trim()
       // "Doe, Jane" stays one name inside an and-list (BibTeX style).
       return isInvertedName(cleaned) ? [cleaned] : expandCommaList(cleaned)
@@ -133,6 +150,9 @@ function cleanBibtexValue(value: string | undefined): string {
     .replace(/\s+/g, " ")
     .trim()
 }
+
+/** Fields whose characters are literal ("~" and "--" in URLs aren't TeX markup). */
+const VERBATIM_FIELDS = new Set(["url", "doi", "eprint", "file"])
 
 const withPeriod = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 const pageRange = (pages: string) => pages.replace(/\s*-{1,2}\s*/g, "–")
@@ -197,7 +217,9 @@ export function generateApaReference(source: Source, language: CitationLanguage 
   const terms = TERMS[language]
   const entry = source.bibtex ? parseBibtex(source.bibtex) : null
   const fields: Record<string, string> = {}
-  for (const [key, value] of Object.entries(entry?.fields ?? {})) fields[key] = cleanBibtexValue(value)
+  for (const [key, value] of Object.entries(entry?.fields ?? {})) {
+    fields[key] = VERBATIM_FIELDS.has(key) ? cleanBibtexValue(value) : latexToText(value)
+  }
   const type = entry?.type ?? "misc"
 
   const authors = formatApaAuthors(parseAuthorNames(source.authors || fields.author))
@@ -267,7 +289,7 @@ export function generateApaReference(source: Source, language: CitationLanguage 
     if (publisher) push(`${withPeriod(publisher)} `)
   } else if (!isThesis) {
     if (publisher) push(`${withPeriod(publisher)} `)
-    else if (fields.howpublished && !/^\\?url/i.test(fields.howpublished)) push(`${withPeriod(fields.howpublished)} `)
+    else if (fields.howpublished && !/^(\\?url|https?:\/\/)/i.test(fields.howpublished)) push(`${withPeriod(fields.howpublished)} `)
   }
 
   if (link) push(link)

@@ -2,7 +2,9 @@
  * Utility functions for sources: CSV parsing, export, and formatting
  */
 
-import type { Source, ImportSourceData } from "@/types/sources"
+import type { Source, ImportSourceData, ImportType } from "@/types/sources"
+import { parseBibtexEntries, bibtexToSourceFields, serializeBibtex } from "@/lib/bibtex"
+import { splitOutsideBraces } from "@/lib/authors"
 
 /**
  * Sanitize filename by removing invalid characters
@@ -382,40 +384,24 @@ function parseMiroCSV(csvText: string): Array<Record<string, string>> {
 }
 
 /**
- * Convert author string to semicolon-separated format if possible
+ * Convert author string to semicolon-separated format if possible.
+ * Separators inside {braces} don't split: "{Barnes and Noble}" stays one author.
  */
 function normalizeAuthors(authorStr: string | null | undefined): string | null {
   if (!authorStr || !authorStr.trim()) return null
 
   const trimmed = authorStr.trim()
-  
-  // Try different separators
-  // Common patterns: comma, semicolon, "and", newline
-  let authors: string[] = []
-  
-  // Check for semicolon (already in correct format)
-  if (trimmed.includes(";")) {
-    authors = trimmed.split(";").map(a => a.trim()).filter(a => a)
-  }
-  // Check for comma
-  else if (trimmed.includes(",")) {
-    authors = trimmed.split(",").map(a => a.trim()).filter(a => a)
-  }
-  // Check for "and"
-  else if (trimmed.toLowerCase().includes(" and ")) {
-    authors = trimmed.split(/\s+and\s+/i).map(a => a.trim()).filter(a => a)
-  }
-  // Check for newline
-  else if (trimmed.includes("\n")) {
-    authors = trimmed.split("\n").map(a => a.trim()).filter(a => a)
-  }
-  // Otherwise keep as is
-  else {
-    return trimmed
-  }
 
-  // Return semicolon-separated format
-  return authors.length > 0 ? authors.join("; ") : trimmed
+  // Common separators, in order of precedence: semicolon (already the app's format), comma,
+  // "and", newline. Without any of them the value is kept as is.
+  for (const separator of [/;/, /,/, /\s+and\s+/i, /\n/]) {
+    const parts = splitOutsideBraces(trimmed, separator)
+    if (parts.length > 1) {
+      const authors = parts.map((a) => a.trim()).filter((a) => a)
+      return authors.length > 0 ? authors.join("; ") : trimmed
+    }
+  }
+  return trimmed
 }
 
 /**
@@ -427,13 +413,46 @@ export function extractLinksFromText(text: string | null): string | null {
 }
 
 /**
- * Parse imported file (CSV, JSON, or Miro CSV) into import format
+ * Parse a BibTeX file into one import row per entry, filling the source fields from it
+ */
+function parseBibtexFile(text: string): ImportSourceData[] {
+  const entries = parseBibtexEntries(text)
+  if (entries.length === 0) throw new Error("No BibTeX entries found")
+
+  return entries.map((entry) => {
+    const fields = bibtexToSourceFields(entry)
+    return {
+      abbreviation: fields.abbreviation ?? null,
+      title: fields.title || entry.key,
+      authors: fields.authors ?? null,
+      publicationDate: fields.publicationDate ?? null,
+      description: fields.description ?? null,
+      notes: fields.notes ?? null,
+      links: fields.links ?? null,
+      // Keep the entry as written; rebuild it only when it depends on the rest of the file.
+      bibtex: entry.standalone ? entry.raw : serializeBibtex(entry),
+      tagNames: [],
+      tagColors: {},
+      tagAbbreviations: {},
+      // Containers that other entries cross-reference (e.g. a @proceedings volume) are mostly
+      // there to supply fields, so they start unselected.
+      preselected: !entry.crossrefParent,
+    }
+  })
+}
+
+/**
+ * Parse imported file (CSV, JSON, Miro CSV, or BibTeX) into import format
  */
 export function parseImportFile(
   text: string,
   fileName: string,
-  importType: "csv" | "json" | "miro-csv" = "csv"
+  importType: ImportType = "csv"
 ): ImportSourceData[] {
+  if (importType === "bibtex") {
+    return parseBibtexFile(text)
+  }
+
   type ParsedRow = Record<string, unknown> & {
     abbreviation?: string
     title?: string

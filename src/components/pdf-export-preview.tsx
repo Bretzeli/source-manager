@@ -3,6 +3,7 @@
 import { useMemo, type CSSProperties } from "react"
 import type { Source } from "@/types/sources"
 import { generateAPACitation } from "@/lib/apa-citation"
+import { stripBraces } from "@/lib/authors"
 import type { PdfDocumentStrings, PdfExportConfig } from "@/lib/pdf-export/config"
 import { formatLongDate, formatPublicationDate } from "@/lib/pdf-export/format"
 import { KEY_SIZE, MARGIN_TOP, MARGIN_X, PAGE, QR_SIZE, QR_TILE_PADDING, SIZE, keyColumnWidth } from "@/lib/pdf-export/metrics"
@@ -131,7 +132,7 @@ export function PdfExportPreview({
 
         {sources.slice(0, PREVIEW_ENTRIES).map((source, index) => {
           const key = showKeys ? source.abbreviation?.trim() ?? "" : String(index + 1).padStart(Math.max(2, String(sources.length).length), "0")
-          const authors = fields.has("authors") ? source.authors?.trim() : ""
+          const authors = fields.has("authors") ? stripBraces(source.authors ?? "").trim() : ""
           const date = fields.has("publicationDate") ? formatPublicationDate(source.publicationDate, locale) : null
           const description = fields.has("description") ? plainText(source.description) : ""
           const notes = fields.has("notes") ? plainText(source.notes) : ""

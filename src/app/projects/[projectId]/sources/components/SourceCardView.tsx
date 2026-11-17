@@ -21,6 +21,7 @@ import {
 import { useTranslations } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { formatPublicationDate } from "@/lib/sources-utils"
+import { stripBraces } from "@/lib/authors"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -363,7 +364,7 @@ function SourceCard({
                 "authors",
                 <div className="flex items-start gap-2 text-sm text-muted-foreground">
                   <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span className="whitespace-pre-wrap break-words">{source.authors}</span>
+                  <span className="whitespace-pre-wrap break-words">{stripBraces(source.authors ?? "")}</span>
                 </div>
               )
             : addChip("authors"))}

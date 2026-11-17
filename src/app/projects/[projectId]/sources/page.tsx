@@ -7,6 +7,7 @@ import { parseBibtex, bibtexToSourceFields } from "@/lib/bibtex"
 import { useSources } from "@/hooks/use-sources"
 import { loadViewMode, saveViewMode, type SourcesViewMode } from "@/lib/sources-preferences"
 import { formatPublicationDate } from "@/lib/sources-utils"
+import { stripBraces } from "@/lib/authors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -55,7 +56,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Plus, MoreVertical, Trash2, Copy, FileText, Settings2, ArrowUpDown, Search, ChevronUp, ChevronDown, Download, Upload, Tag, Edit2, Merge, Maximize, Minimize, FileDown, Expand, Table2, LayoutGrid, ArrowUpNarrowWide, ArrowDownWideNarrow, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { ColumnKey, Source } from "@/types/sources"
+import type { ColumnKey, ImportType, Source } from "@/types/sources"
 import { PDFExportDialog } from "@/components/pdf-export-dialog"
 import { PREDEFINED_COLORS } from "./constants"
 import { renderLinks } from "./utils/render-links"
@@ -586,6 +587,9 @@ export default function SourcesPage() {
             <DropdownMenuItem onClick={() => { setImportType("miro-csv"); setImportDialogOpen(true); }}>
               Custom Miro CSV
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { setImportType("bibtex"); setImportDialogOpen(true); }}>
+              BibTeX
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <Button 
@@ -906,7 +910,7 @@ export default function SourcesPage() {
                             ) : col === "links" ? (
                               <div className="text-sm break-words">{renderLinks(cellValue)}</div>
                             ) : col === "authors" ? (
-                              <div className="text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                              <div className="text-sm whitespace-pre-wrap break-words">{cellValue ? stripBraces(cellValue) : "-"}</div>
                             ) : col === "title" ? (
                               <div className="text-sm break-words" style={{ wordBreak: "break-word", overflowWrap: "break-word" }}>{cellValue || "-"}</div>
                             ) : col === "abbreviation" ? (
@@ -1561,7 +1565,7 @@ export default function SourcesPage() {
                                 ) : col === "links" ? (
                                   <div className="max-w-[300px] text-sm">{renderLinks(cellValue)}</div>
                                 ) : col === "authors" ? (
-                                  <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                                  <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue ? stripBraces(cellValue) : "-"}</div>
                                 ) : col === "bibtex" || col === "description" || col === "notes" ? (
                                   <div className="max-w-[400px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
                                 ) : (
@@ -1622,7 +1626,7 @@ export default function SourcesPage() {
                 <input
                   id="import-file"
                   type="file"
-                  accept={importType === "json" ? ".json" : ".csv"}
+                  accept={importType === "json" ? ".json" : importType === "bibtex" ? ".bib,.bibtex" : ".csv"}
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -1639,7 +1643,7 @@ export default function SourcesPage() {
                   </span>
                 </div>
                 <div className="flex gap-2">
-                  <Select value={importType} onValueChange={(v) => setImportType(v as "csv" | "json" | "miro-csv")}>
+                  <Select value={importType} onValueChange={(v) => setImportType(v as ImportType)}>
                     <SelectTrigger className="w-[180px]">
                       <SelectValue />
                     </SelectTrigger>
@@ -1647,6 +1651,7 @@ export default function SourcesPage() {
                       <SelectItem value="csv">CSV</SelectItem>
                       <SelectItem value="json">JSON</SelectItem>
                       <SelectItem value="miro-csv">Custom Miro CSV</SelectItem>
+                      <SelectItem value="bibtex">BibTeX</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1699,6 +1704,9 @@ export default function SourcesPage() {
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {selectedImportIndices.size} {t.sources.import.sourcesToImport}
+                  {importData.some((source) => source.preselected === false) && (
+                    <p className="mt-1 text-xs">{t.sources.import.crossrefParentsUnselected}</p>
+                  )}
                 </div>
                 {importData.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
@@ -1784,7 +1792,7 @@ export default function SourcesPage() {
                                     ) : col === "links" ? (
                                       <div className="max-w-[300px] text-sm">{renderLinks(cellValue)}</div>
                                     ) : col === "authors" ? (
-                                      <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
+                                      <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{cellValue ? stripBraces(cellValue) : "-"}</div>
                                     ) : col === "bibtex" || col === "description" || col === "notes" ? (
                                       <div className="max-w-[400px] text-sm whitespace-pre-wrap break-words">{cellValue || "-"}</div>
                                     ) : (
@@ -2000,7 +2008,7 @@ export default function SourcesPage() {
                                 <div className="max-w-[300px] truncate">{source.title || "-"}</div>
                               </TableCell>
                               <TableCell>
-                                <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{source.authors || "-"}</div>
+                                <div className="max-w-[200px] text-sm whitespace-pre-wrap break-words">{source.authors ? stripBraces(source.authors) : "-"}</div>
                               </TableCell>
                               <TableCell>
                                 <div className="whitespace-nowrap text-sm">{formatPublicationDate(source.publicationDate)}</div>

@@ -47,6 +47,8 @@ export type SourcePreferences = {
   autoResizeTextarea?: boolean
 }
 
+export type ImportType = "csv" | "json" | "miro-csv" | "bibtex"
+
 export type ImportSourceData = {
   abbreviation?: string | null
   title: string
@@ -59,5 +61,7 @@ export type ImportSourceData = {
   tagNames?: string[]
   tagColors?: Record<string, string>
   tagAbbreviations?: Record<string, string>
+  /** Whether the row starts selected in the import preview (default: true) */
+  preselected?: boolean
 }
 

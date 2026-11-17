@@ -3,6 +3,7 @@ import { Document, Link, Page, Path, StyleSheet, Svg, Text, View } from "@react-
 import type { Style } from "@react-pdf/types"
 import type { Source } from "@/types/sources"
 import { generateApaReference } from "@/lib/apa-citation"
+import { stripBraces } from "@/lib/authors"
 import { breakable, preserveIndentation } from "./breakable"
 import type { PdfDocumentStrings, PdfExportConfig } from "./config"
 import { FONT } from "./fonts"
@@ -203,7 +204,7 @@ function Entry({
   const { config, palette, strings, locale } = props
   const fields = new Set<string>(config.fields)
   const title = source.title?.trim()
-  const authors = fields.has("authors") ? source.authors?.trim() : ""
+  const authors = fields.has("authors") ? stripBraces(source.authors ?? "").trim() : ""
   const date = fields.has("publicationDate") ? formatPublicationDate(source.publicationDate, locale) : null
   const key =
     keyMode === "abbreviation"
